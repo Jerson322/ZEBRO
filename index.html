@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ZEBRO</title>
-  <meta name="description" content="ZEBRO">
+  <meta name="description" content="Bienvenidos a ZEBRO. Próximamente.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://zebro.store/">
   <meta property="og:title" content="ZEBRO">
-  <meta property="og:description" content="ZEBRO">
+  <meta property="og:description" content="Bienvenidos. Próximamente.">
   <meta property="og:image" content="https://zebro.store/gif/preview.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -22,16 +22,34 @@
     }
     body {
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 24px;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: #fff;
+      text-align: center;
+    }
+    h1 {
+      margin: 0 16px;
+      font-size: clamp(28px, 6vw, 56px);
+      line-height: 1.15;
+    }
+    h1 span {
+      display: block;
+      font-size: 0.5em;
+      font-weight: 400;
+      opacity: 0.8;
+      margin-top: 8px;
     }
     img {
       max-width: 90vw;
-      max-height: 90vh;
+      max-height: 60vh;
     }
   </style>
 </head>
 <body>
+  <h1>Bienvenidos<span>Próximamente</span></h1>
   <img src="gif/zebro.gif" alt="ZEBRO">
 </body>
 </html>
