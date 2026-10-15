@@ -109,7 +109,7 @@ export default async function handler(req, res) {
   }
 
   const precio = precioDeVenta(producto, variante);
-  const envio = costoDeEnvio(origenDe(producto.idProduct), v.departamento);
+  const envio = costoDeEnvio(await origenDe(producto), v.departamento);
   const [primerNombre, ...apellidos] = v.nombre.split(" ");
   const direccion = {
     zip: null,

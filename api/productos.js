@@ -26,9 +26,9 @@ export default async function handler(req, res) {
     if (resultados.length < POR_PAGINA) break;
   }
 
-  const productos = todos
-    .filter((p) => p.nameState === "Activo")
-    .map((p) => {
+  const activos = todos.filter((p) => p.nameState === "Activo");
+  const origenes = await Promise.all(activos.map(origenDe));
+  const productos = activos.map((p, i) => {
       const variantes = variantesDisponibles(p).map((v) => ({
         id: v.id,
         nombre: v.nombre,
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
         imagen: p.urlImageProduct,
         precio: variantes.length ? Math.min(...variantes.map((v) => v.precio)) : precioDeVenta(p),
         stock: p.stockTotal,
-        origen: origenDe(p.idProduct),
+        origen: origenes[i],
         variantes,
       };
     });
