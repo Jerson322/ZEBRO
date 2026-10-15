@@ -170,14 +170,14 @@
     <div class="modal exito" id="exito" hidden>
       <h3>¡Pedido recibido! 🎉</h3>
       <p>Tu número de pedido es <strong id="e-pedido"></strong>.<br>Te contactaremos para confirmar el envío.</p>
-      <p><a id="e-whatsapp" target="_blank" rel="noopener" hidden>Escríbenos por WhatsApp</a></p>
+      <p><a id="e-whatsapp" target="_blank" rel="noopener" hidden>Confirmar por WhatsApp</a></p>
       <button type="button" class="secundario" id="e-cerrar">Cerrar</button>
     </div>
   </dialog>
 
   <script>
     // Número de WhatsApp con indicativo, sin espacios ni "+". Ejemplo: "573001234567". Vacío = sin botón.
-    const WHATSAPP = "";
+    const WHATSAPP = "573227131453";
 
     const pesos = (n) => "$" + Number(n).toLocaleString("es-CO");
     const $ = (id) => document.getElementById(id);
@@ -294,7 +294,7 @@
         });
         const data = await res.json();
         if (!res.ok) throw new Error((data.error || "No pudimos registrar tu pedido.") + (data.detalle ? ` (${data.detalle}${data.campos ? ": " + JSON.stringify(data.campos) : ""})` : ""));
-        mostrarExito(data.pedido);
+        mostrarExito(data.pedido, resumenPedido());
         ev.target.reset();
       } catch (e) {
         mostrarError(e.message);
@@ -309,12 +309,17 @@
       $("m-error").hidden = false;
     }
 
-    function mostrarExito(pedido) {
+    function resumenPedido() {
+      const variante = $("m-variante-wrap").hidden ? "" : ` - ${$("m-variante").selectedOptions[0].text}`;
+      return `${productoActual.nombre}${variante} x${$("m-cantidad").value}, total ${$("m-total").textContent}`;
+    }
+
+    function mostrarExito(pedido, resumen) {
       $("formulario").hidden = true;
       $("exito").hidden = false;
       $("e-pedido").textContent = pedido;
       if (WHATSAPP) {
-        const texto = `Hola, hice el pedido ${pedido} en zebro.store`;
+        const texto = `Hola, hice el pedido ${pedido} en zebro.store: ${resumen}. Confirmo mi pedido.`;
         $("e-whatsapp").href = `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(texto)}`;
         $("e-whatsapp").hidden = false;
       }
