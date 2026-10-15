@@ -1,6 +1,7 @@
 import { mastershop, tieneApiKey } from "../lib/mastershop.js";
 import { precioDeVenta } from "../lib/precios.js";
 import { variantesDisponibles } from "../lib/variantes.js";
+import { ENVIO_POR_DEPARTAMENTO } from "../lib/envio.js";
 
 const POR_PAGINA = 50; // la API recorta cualquier límite mayor a 50
 const MAX_PAGINAS = 10;
@@ -27,16 +28,24 @@ export default async function handler(req, res) {
 
   const productos = todos
     .filter((p) => p.nameState === "Activo")
-    .map((p) => ({
-      id: p.idProduct,
-      nombre: p.name.trim(),
-      descripcion: p.description,
-      imagen: p.urlImageProduct,
-      precio: precioDeVenta(p),
-      stock: p.stockTotal,
-      variantes: variantesDisponibles(p).map(({ id, nombre, stock }) => ({ id, nombre, stock })),
-    }));
+    .map((p) => {
+      const variantes = variantesDisponibles(p).map((v) => ({
+        id: v.id,
+        nombre: v.nombre,
+        stock: v.stock,
+        precio: precioDeVenta(p, v),
+      }));
+      return {
+        id: p.idProduct,
+        nombre: p.name.trim(),
+        descripcion: p.description,
+        imagen: p.urlImageProduct,
+        precio: variantes.length ? Math.min(...variantes.map((v) => v.precio)) : precioDeVenta(p),
+        stock: p.stockTotal,
+        variantes,
+      };
+    });
 
   res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");
-  return res.status(200).json({ productos });
+  return res.status(200).json({ productos, envios: ENVIO_POR_DEPARTAMENTO });
 }

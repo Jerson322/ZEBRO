@@ -1,6 +1,7 @@
 import { mastershop, tieneApiKey } from "../lib/mastershop.js";
 import { precioDeVenta } from "../lib/precios.js";
 import { variantesDisponibles } from "../lib/variantes.js";
+import { costoDeEnvio } from "../lib/envio.js";
 
 const MAX_CANTIDAD = 5;
 // Límite simple contra pedidos repetidos: por IP, dentro de la misma instancia del servidor.
@@ -52,7 +53,7 @@ function validar(datos) {
   }
   if (nombre.split(" ").length < 2) return { error: "Escribe tu nombre y apellido" };
   if (!/^3\d{9}$/.test(telefono)) return { error: "Escribe un celular válido de 10 dígitos" };
-  if (departamento.length < 3) return { error: "Elige tu departamento" };
+  if (costoDeEnvio(departamento) === null) return { error: "Elige tu departamento" };
   if (ciudad.length < 2) return { error: "Escribe tu ciudad" };
   if (direccion.length < 5) return { error: "Escribe tu dirección completa" };
 
@@ -107,7 +108,8 @@ export default async function handler(req, res) {
     return res.status(409).json({ error: "No hay suficientes unidades disponibles" });
   }
 
-  const precio = precioDeVenta(producto);
+  const precio = precioDeVenta(producto, variante);
+  const envio = costoDeEnvio(v.departamento);
   const [primerNombre, ...apellidos] = v.nombre.split(" ");
   const direccion = {
     zip: null,
@@ -130,7 +132,7 @@ export default async function handler(req, res) {
     billing_address: direccion,
     order_transaction: {
       // Pesos enteros: price × quantity cuadra exacto, sin errores de coma flotante.
-      total: precio * v.cantidad,
+      total: precio * v.cantidad + envio,
       currency: "COP",
       payment_method: "cod",
       payment_gateway: "contraentrega",
@@ -156,7 +158,7 @@ export default async function handler(req, res) {
         price: precio,
       },
     ],
-    additional_charge: [],
+    additional_charge: [{ type_charge: "Envío", value: envio }],
     notes: v.indicaciones ? [v.indicaciones] : [],
     tags: ["zebro.store"],
   };
