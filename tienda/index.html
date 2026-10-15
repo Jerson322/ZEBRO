@@ -281,7 +281,7 @@
           body: JSON.stringify(datos),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "No pudimos registrar tu pedido.");
+        if (!res.ok) throw new Error((data.error || "No pudimos registrar tu pedido.") + (data.detalle ? ` (${data.detalle}${data.campos ? ": " + JSON.stringify(data.campos) : ""})` : ""));
         mostrarExito(data.pedido);
         ev.target.reset();
       } catch (e) {
