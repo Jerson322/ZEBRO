@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZEBRO · Tienda</title>
+  <!-- En pruebas: que Google no la indexe todavía -->
+  <meta name="robots" content="noindex">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 20px 16px;
+      border-bottom: 1px solid #222;
+    }
+    header img { height: 48px; border-radius: 8px; }
+    header h1 { margin: 0; font-size: 28px; letter-spacing: 2px; }
+    .aviso {
+      text-align: center;
+      padding: 10px 16px;
+      background: #111;
+      color: #ccc;
+      font-size: 14px;
+    }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+    .estado { text-align: center; color: #aaa; padding: 48px 0; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: #111;
+      border: 1px solid #222;
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .card img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #fff; }
+    .card .info { padding: 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+    .card h2 { margin: 0; font-size: 16px; font-weight: 600; }
+    .precio { font-size: 20px; font-weight: 700; }
+    .agotado { color: #f66; font-size: 14px; }
+    button {
+      font: inherit;
+      cursor: pointer;
+      border: 0;
+      border-radius: 8px;
+      padding: 12px 16px;
+      background: #fff;
+      color: #000;
+      font-weight: 700;
+    }
+    button:disabled { opacity: 0.4; cursor: default; }
+    .card button { margin-top: auto; }
+
+    dialog {
+      width: min(480px, calc(100vw - 32px));
+      max-height: calc(100vh - 32px);
+      background: #111;
+      color: #fff;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 0;
+    }
+    dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
+    .modal { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+    .modal-head { display: flex; gap: 12px; align-items: center; }
+    .modal-head img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; background: #fff; }
+    .modal-head h3 { margin: 0; font-size: 16px; }
+    label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: #ccc; }
+    input, select, textarea {
+      font: inherit;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background: #000;
+      color: #fff;
+    }
+    .fila { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .total { display: flex; justify-content: space-between; font-size: 18px; font-weight: 700; padding-top: 8px; border-top: 1px solid #222; }
+    .nota { font-size: 13px; color: #aaa; margin: 0; }
+    .error { color: #f66; font-size: 14px; margin: 0; }
+    .acciones { display: flex; gap: 8px; }
+    .acciones button { flex: 1; }
+    .secundario { background: #222; color: #fff; }
+    .trampa { position: absolute; left: -9999px; }
+    .exito { text-align: center; }
+    .exito a { color: #000; background: #25d366; display: inline-block; padding: 12px 16px; border-radius: 8px; font-weight: 700; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="/gif/zebro.gif" alt="">
+    <h1>ZEBRO</h1>
+  </header>
+  <div class="aviso">🚚 Envío gratis · 💵 Pagas cuando lo recibes</div>
+
+  <main>
+    <p class="estado" id="estado">Cargando productos…</p>
+    <div class="grid" id="grid"></div>
+  </main>
+
+  <dialog id="dialogo">
+    <form class="modal" id="formulario" novalidate>
+      <div class="modal-head">
+        <img id="m-imagen" alt="">
+        <div>
+          <h3 id="m-nombre"></h3>
+          <div id="m-precio"></div>
+        </div>
+      </div>
+
+      <label id="m-variante-wrap" hidden>Opción
+        <select name="idVariante" id="m-variante"></select>
+      </label>
+      <label>Cantidad
+        <select name="cantidad" id="m-cantidad"></select>
+      </label>
+      <label>Nombre y apellido
+        <input name="nombre" autocomplete="name" required>
+      </label>
+      <label>Celular
+        <input name="telefono" type="tel" inputmode="numeric" autocomplete="tel" placeholder="3001234567" required>
+      </label>
+      <div class="fila">
+        <label>Departamento
+          <select name="departamento" id="m-departamento" required></select>
+        </label>
+        <label>Ciudad
+          <input name="ciudad" autocomplete="address-level2" required>
+        </label>
+      </div>
+      <label>Dirección
+        <input name="direccion" autocomplete="street-address" placeholder="Calle 10 # 20-30" required>
+      </label>
+      <div class="fila">
+        <label>Barrio
+          <input name="barrio">
+        </label>
+        <label>Apto / indicaciones
+          <input name="indicaciones" placeholder="Apto 501, torre 2">
+        </label>
+      </div>
+      <input class="trampa" name="sitio" tabindex="-1" autocomplete="off" aria-hidden="true">
+
+      <div class="total"><span>Total</span><span id="m-total"></span></div>
+      <p class="nota">Pagas en efectivo al recibir. Envío incluido.</p>
+      <p class="error" id="m-error" hidden></p>
+
+      <div class="acciones">
+        <button type="button" class="secundario" id="m-cancelar">Cancelar</button>
+        <button type="submit" id="m-enviar">Confirmar pedido</button>
+      </div>
+    </form>
+
+    <div class="modal exito" id="exito" hidden>
+      <h3>¡Pedido recibido! 🎉</h3>
+      <p>Tu número de pedido es <strong id="e-pedido"></strong>.<br>Te contactaremos para confirmar el envío.</p>
+      <p><a id="e-whatsapp" target="_blank" rel="noopener" hidden>Escríbenos por WhatsApp</a></p>
+      <button type="button" class="secundario" id="e-cerrar">Cerrar</button>
+    </div>
+  </dialog>
+
+  <script>
+    // Número de WhatsApp con indicativo, sin espacios ni "+". Ejemplo: "573001234567". Vacío = sin botón.
+    const WHATSAPP = "";
+
+    const DEPARTAMENTOS = [
+      "Amazonas", "Antioquia", "Arauca", "Atlántico", "Bolívar", "Boyacá", "Caldas", "Caquetá",
+      "Casanare", "Cauca", "Cesar", "Chocó", "Córdoba", "Cundinamarca", "Guainía", "Guaviare",
+      "Huila", "La Guajira", "Magdalena", "Meta", "Nariño", "Norte de Santander", "Putumayo",
+      "Quindío", "Risaralda", "San Andrés y Providencia", "Santander", "Sucre", "Tolima",
+      "Valle del Cauca", "Vaupés", "Vichada",
+    ];
+
+    const pesos = (n) => "$" + Number(n).toLocaleString("es-CO");
+    const $ = (id) => document.getElementById(id);
+    let productoActual = null;
+
+    $("m-departamento").innerHTML =
+      '<option value="">Elige…</option>' +
+      DEPARTAMENTOS.map((d) => `<option>${d}</option>`).join("");
+
+    function crearCard(p) {
+      const card = document.createElement("article");
+      card.className = "card";
+      const img = document.createElement("img");
+      img.src = p.imagen;
+      img.alt = p.nombre;
+      img.loading = "lazy";
+      const info = document.createElement("div");
+      info.className = "info";
+      const h2 = document.createElement("h2");
+      h2.textContent = p.nombre;
+      const precio = document.createElement("div");
+      precio.className = "precio";
+      precio.textContent = pesos(p.precio);
+      const boton = document.createElement("button");
+      boton.textContent = p.stock > 0 ? "Pedir contra entrega" : "Agotado";
+      boton.disabled = p.stock <= 0;
+      boton.addEventListener("click", () => abrirPedido(p));
+      info.append(h2, precio, boton);
+      card.append(img, info);
+      return card;
+    }
+
+    async function cargarProductos() {
+      try {
+        const res = await fetch("/api/productos");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        if (!data.productos.length) {
+          $("estado").textContent = "Pronto tendremos productos disponibles.";
+          return;
+        }
+        $("estado").hidden = true;
+        $("grid").append(...data.productos.map(crearCard));
+      } catch (e) {
+        $("estado").textContent = "No pudimos cargar los productos. Intenta de nuevo en un momento.";
+      }
+    }
+
+    function actualizarTotal() {
+      $("m-total").textContent = pesos(productoActual.precio * Number($("m-cantidad").value));
+    }
+
+    function abrirPedido(p) {
+      productoActual = p;
+      $("formulario").hidden = false;
+      $("exito").hidden = true;
+      $("m-error").hidden = true;
+      $("m-imagen").src = p.imagen;
+      $("m-nombre").textContent = p.nombre;
+      $("m-precio").textContent = pesos(p.precio);
+      const max = Math.min(5, p.stock);
+      $("m-cantidad").innerHTML = Array.from({ length: max }, (_, i) => `<option>${i + 1}</option>`).join("");
+
+      // Las variaciones (talla, color…) se muestran solo si el producto las tiene.
+      const variantes = (p.variaciones || [])
+        .map((v) => ({ id: v.idVariant ?? v.id_variant ?? v.idVariation ?? v.id, nombre: v.name ?? v.nombre ?? v.value }))
+        .filter((v) => v.id != null);
+      $("m-variante-wrap").hidden = variantes.length === 0;
+      $("m-variante").required = variantes.length > 0;
+      $("m-variante").replaceChildren(
+        new Option("Elige…", ""),
+        ...variantes.map((v) => new Option(v.nombre ?? v.id, v.id))
+      );
+
+      actualizarTotal();
+      $("dialogo").showModal();
+    }
+
+    $("m-cantidad").addEventListener("change", actualizarTotal);
+    $("m-cancelar").addEventListener("click", () => $("dialogo").close());
+    $("e-cerrar").addEventListener("click", () => $("dialogo").close());
+
+    $("formulario").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const datos = Object.fromEntries(new FormData(ev.target));
+      datos.idProducto = productoActual.id;
+
+      if (!$("m-variante-wrap").hidden && !datos.idVariante) {
+        return mostrarError("Elige una opción del producto");
+      }
+
+      $("m-enviar").disabled = true;
+      $("m-enviar").textContent = "Enviando…";
+      try {
+        const res = await fetch("/api/pedido", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(datos),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "No pudimos registrar tu pedido.");
+        mostrarExito(data.pedido);
+        ev.target.reset();
+      } catch (e) {
+        mostrarError(e.message);
+      } finally {
+        $("m-enviar").disabled = false;
+        $("m-enviar").textContent = "Confirmar pedido";
+      }
+    });
+
+    function mostrarError(mensaje) {
+      $("m-error").textContent = mensaje;
+      $("m-error").hidden = false;
+    }
+
+    function mostrarExito(pedido) {
+      $("formulario").hidden = true;
+      $("exito").hidden = false;
+      $("e-pedido").textContent = pedido;
+      if (WHATSAPP) {
+        const texto = `Hola, hice el pedido ${pedido} en zebro.store`;
+        $("e-whatsapp").href = `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(texto)}`;
+        $("e-whatsapp").hidden = false;
+      }
+    }
+
+    cargarProductos();
+  </script>
+  <script defer src="/_vercel/insights/script.js"></script>
+</body>
+</html>
