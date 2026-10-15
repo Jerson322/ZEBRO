@@ -1,7 +1,7 @@
 import { mastershop, tieneApiKey } from "../lib/mastershop.js";
 import { precioDeVenta } from "../lib/precios.js";
 import { variantesDisponibles } from "../lib/variantes.js";
-import { costoDeEnvio } from "../lib/envio.js";
+import { costoDeEnvio, DEPARTAMENTOS, origenDe } from "../lib/envio.js";
 
 const MAX_CANTIDAD = 5;
 // Límite simple contra pedidos repetidos: por IP, dentro de la misma instancia del servidor.
@@ -53,7 +53,7 @@ function validar(datos) {
   }
   if (nombre.split(" ").length < 2) return { error: "Escribe tu nombre y apellido" };
   if (!/^3\d{9}$/.test(telefono)) return { error: "Escribe un celular válido de 10 dígitos" };
-  if (costoDeEnvio(departamento) === null) return { error: "Elige tu departamento" };
+  if (!DEPARTAMENTOS.includes(departamento)) return { error: "Elige tu departamento" };
   if (ciudad.length < 2) return { error: "Escribe tu ciudad" };
   if (direccion.length < 5) return { error: "Escribe tu dirección completa" };
 
@@ -109,7 +109,7 @@ export default async function handler(req, res) {
   }
 
   const precio = precioDeVenta(producto, variante);
-  const envio = costoDeEnvio(v.departamento);
+  const envio = costoDeEnvio(origenDe(producto.idProduct), v.departamento);
   const [primerNombre, ...apellidos] = v.nombre.split(" ");
   const direccion = {
     zip: null,

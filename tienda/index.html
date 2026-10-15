@@ -220,7 +220,7 @@
         envios = data.envios;
         $("m-departamento").replaceChildren(
           new Option("Elige…", ""),
-          ...Object.keys(envios).sort((a, b) => a.localeCompare(b, "es")).map((d) => new Option(d, d))
+          ...Object.keys(Object.values(envios)[0]).map((d) => new Option(d, d))
         );
         $("estado").hidden = true;
         $("grid").append(...data.productos.map(crearCard));
@@ -238,7 +238,7 @@
     function actualizarTotal() {
       const precio = precioActual();
       const subtotal = precio * Number($("m-cantidad").value);
-      const envio = envios[$("m-departamento").value];
+      const envio = envios[productoActual.origen]?.[$("m-departamento").value];
       $("m-precio").textContent = pesos(precio);
       $("m-subtotal").textContent = pesos(subtotal);
       $("m-envio").textContent = envio ? pesos(envio) : "Elige tu departamento";
