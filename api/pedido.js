@@ -1,5 +1,6 @@
 import { mastershop, tieneApiKey } from "../lib/mastershop.js";
 import { precioDeVenta } from "../lib/precios.js";
+import { variantesDisponibles } from "../lib/variantes.js";
 
 const MAX_CANTIDAD = 5;
 // Límite simple contra pedidos repetidos: por IP, dentro de la misma instancia del servidor.
@@ -90,12 +91,19 @@ export default async function handler(req, res) {
   }
 
   // El precio y el nombre salen siempre de Mastershop y de lib/precios.js, nunca del navegador.
-  const consulta = await mastershop(`/api/products/${v.idProducto}`);
+  const consulta = await mastershop(`/api/products/${v.idProducto}?includeAllVariations=true`);
   const producto = (consulta.data?.results ?? consulta.data?.data?.results)?.[0];
   if (consulta.status !== 200 || !producto || producto.nameState !== "Activo") {
     return res.status(404).json({ error: "Este producto ya no está disponible" });
   }
-  if (producto.stockTotal < v.cantidad) {
+
+  const variantes = variantesDisponibles(producto);
+  const variante = variantes.find((x) => x.id === v.idVariante) ?? null;
+  if (variantes.length > 0 && !variante) {
+    return res.status(400).json({ error: "Elige una opción disponible del producto" });
+  }
+  const stock = variante ? variante.stock : producto.stockTotal;
+  if (stock < v.cantidad) {
     return res.status(409).json({ error: "No hay suficientes unidades disponibles" });
   }
 
@@ -140,11 +148,11 @@ export default async function handler(req, res) {
     order_items: [
       {
         id_product: v.idProducto,
-        id_variant: v.idVariante,
+        id_variant: variante?.id ?? null,
         quantity: v.cantidad,
-        sku: null,
-        name: producto.name,
-        weight: null,
+        sku: variante?.sku ?? null,
+        name: variante ? `${producto.name.trim()} - ${variante.nombre}` : producto.name.trim(),
+        weight: variante?.peso || null,
         price: precio,
       },
     ],

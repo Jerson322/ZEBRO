@@ -1,5 +1,6 @@
 import { mastershop, tieneApiKey } from "../lib/mastershop.js";
 import { precioDeVenta } from "../lib/precios.js";
+import { variantesDisponibles } from "../lib/variantes.js";
 
 const POR_PAGINA = 50; // la API recorta cualquier límite mayor a 50
 const MAX_PAGINAS = 10;
@@ -28,12 +29,12 @@ export default async function handler(req, res) {
     .filter((p) => p.nameState === "Activo")
     .map((p) => ({
       id: p.idProduct,
-      nombre: p.name,
+      nombre: p.name.trim(),
       descripcion: p.description,
       imagen: p.urlImageProduct,
       precio: precioDeVenta(p),
       stock: p.stockTotal,
-      variaciones: p.variation ?? [],
+      variantes: variantesDisponibles(p).map(({ id, nombre, stock }) => ({ id, nombre, stock })),
     }));
 
   res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");

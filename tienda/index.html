@@ -246,10 +246,8 @@
       const max = Math.min(5, p.stock);
       $("m-cantidad").innerHTML = Array.from({ length: max }, (_, i) => `<option>${i + 1}</option>`).join("");
 
-      // Las variaciones (talla, color…) se muestran solo si el producto las tiene.
-      const variantes = (p.variaciones || [])
-        .map((v) => ({ id: v.idVariant ?? v.id_variant ?? v.idVariation ?? v.id, nombre: v.name ?? v.nombre ?? v.value }))
-        .filter((v) => v.id != null);
+      // Las variantes (talla, color, aumento…) se muestran solo si el producto las tiene.
+      const variantes = p.variantes || [];
       $("m-variante-wrap").hidden = variantes.length === 0;
       $("m-variante").required = variantes.length > 0;
       $("m-variante").replaceChildren(
