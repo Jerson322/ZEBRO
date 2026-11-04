@@ -1,5 +1,6 @@
 // Pantallas del sistema. Toda la lógica de negocio está en datos.js.
 import * as d from "./datos.js";
+import * as nube from "./nube.js";
 
 const SECCIONES = {
   inicio: "Inicio",
@@ -22,10 +23,12 @@ function abrirAlmacen() {
 }
 
 const almacen = abrirAlmacen();
-let datos = d.cargar(almacen);
+let datos = nube.nubeActiva ? d.datosVacios() : d.cargar(almacen);
+let estadoNube = "guardado";
 const periodo = { desde: d.hoy().slice(0, 8) + "01", hasta: d.hoy() };
 
 const $vista = document.getElementById("vista");
+const $menu = document.getElementById("menu");
 const $dialogo = document.getElementById("dialogo");
 
 const pesos = (n) => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("es-CO");
@@ -36,6 +39,10 @@ const opciones = (lista, elegido = "") =>
   lista.map((o) => `<option${o === elegido ? " selected" : ""}>${esc(o)}</option>`).join("");
 
 function persistir() {
+  if (nube.nubeActiva) {
+    nube.guardar(datos);
+    return;
+  }
   if (!d.guardar(almacen, datos)) {
     alert("No se pudo guardar en este navegador. Descarga un respaldo para no perder tus datos.");
   }
@@ -189,8 +196,10 @@ const vistas = {
   respaldo() {
     return `
       <div class="encabezado"><h1>Respaldo</h1></div>
-      <div class="alerta">Tus datos se guardan <strong>solo en este navegador</strong>, en este dispositivo.
-        Si borras los datos del navegador o cambias de equipo, se pierden. Descarga un respaldo con frecuencia.</div>
+      ${nube.nubeActiva
+        ? `<div class="alerta">Tus datos se guardan en tu cuenta. Un respaldo es una copia extra en un archivo, por si acaso.</div>`
+        : `<div class="alerta">Tus datos se guardan <strong>solo en este navegador</strong>, en este dispositivo.
+            Si borras los datos del navegador o cambias de equipo, se pierden. Descarga un respaldo con frecuencia.</div>`}
       <div class="panel">
         <p>Último respaldo: <strong>${datos.ultimoRespaldo ? fechaCorta(datos.ultimoRespaldo) : "nunca"}</strong></p>
         <div class="botones" style="justify-content:flex-start">
@@ -203,6 +212,7 @@ const vistas = {
 };
 
 function avisoRespaldo() {
+  if (nube.nubeActiva) return "";
   if (!datos.ventas.length && !datos.productos.length) return "";
   const dias = datos.ultimoRespaldo ? (new Date(d.hoy()) - new Date(datos.ultimoRespaldo)) / 86400000 : Infinity;
   if (dias < DIAS_PARA_RECORDAR_RESPALDO) return "";
@@ -214,15 +224,128 @@ function seccionActual() {
   return SECCIONES[seccion] ? seccion : "inicio";
 }
 
+function pieDelMenu() {
+  if (!nube.nubeActiva) return "";
+  return `<div class="pie"><small id="estado-nube"></small><button class="chico" data-accion="salir">Salir</button></div>`;
+}
+
 function pintar() {
   const actual = seccionActual();
-  document.getElementById("menu").innerHTML =
+  $menu.hidden = false;
+  $menu.innerHTML =
     `<div class="marca">ZEBRO</div>` +
     Object.entries(SECCIONES)
       .map(([id, nombre]) => `<a href="#${id}" class="${id === actual ? "activo" : ""}">${nombre}</a>`)
-      .join("");
+      .join("") +
+    pieDelMenu();
   $vista.innerHTML = vistas[actual]();
+  pintarEstadoNube();
 }
+
+function pintarEstadoNube() {
+  const textos = { guardando: "Guardando…", guardado: "Guardado", error: "Sin guardar: revisa tu conexión" };
+  const $estado = document.getElementById("estado-nube");
+  if (!$estado) return;
+  $estado.textContent = textos[estadoNube] ?? "";
+  $estado.classList.toggle("negativo-claro", estadoNube === "error");
+}
+
+// Sesión y nube
+
+function pantallaLogin() {
+  $menu.hidden = true;
+  $vista.innerHTML = `<form class="panel acceso" id="acceso">
+    <h1>ZEBRO</h1>
+    <label>Correo<input name="correo" type="email" autocomplete="username" required></label>
+    <label>Clave<input name="clave" type="password" autocomplete="current-password" required></label>
+    <p class="error" hidden></p>
+    <button type="submit" class="principal">Entrar</button>
+  </form>`;
+  const $form = document.getElementById("acceso");
+  $form.addEventListener("submit", async (evento) => {
+    evento.preventDefault();
+    const { correo, clave } = Object.fromEntries(new FormData($form));
+    const $boton = $form.querySelector("button");
+    $boton.disabled = true;
+    try {
+      await nube.iniciarSesion(correo, clave);
+      await entrar();
+    } catch (error) {
+      const $error = $form.querySelector(".error");
+      $error.textContent = error.message;
+      $error.hidden = false;
+      $boton.disabled = false;
+    }
+  });
+}
+
+// Sin datos cargados no se muestra el sistema, para no guardar encima un sistema vacío.
+function pantallaError(mensaje) {
+  $menu.hidden = true;
+  $vista.innerHTML = `<div class="panel acceso">
+    <h1>ZEBRO</h1>
+    <p>${esc(mensaje)}</p>
+    <button class="principal" data-accion="reintentar">Reintentar</button>
+  </div>`;
+}
+
+async function entrar() {
+  try {
+    let guardados = await nube.leer();
+    if (guardados === null) {
+      // Primera vez: lo que haya en este navegador pasa a la cuenta.
+      const locales = d.cargar(almacen);
+      if (await nube.crear(locales)) guardados = locales;
+      else guardados = await nube.leer();
+    }
+    datos = { ...d.datosVacios(), ...guardados };
+    pintar();
+  } catch {
+    pantallaError("No pudimos cargar tus datos. Revisa tu conexión e inténtalo de nuevo.");
+  }
+}
+
+async function iniciar() {
+  if (!nube.nubeActiva) {
+    pintar();
+    return;
+  }
+  if (!nube.libreriaCargada()) {
+    pantallaError("No se pudo cargar el sistema. Revisa tu conexión e inténtalo de nuevo.");
+    return;
+  }
+  try {
+    if (await nube.haySesion()) await entrar();
+    else pantallaLogin();
+  } catch {
+    pantallaError("No pudimos revisar tu sesión. Revisa tu conexión e inténtalo de nuevo.");
+  }
+}
+
+async function traerCambiosDeOtroDispositivo() {
+  if (!nube.nubeActiva || $menu.hidden || $dialogo.open) return;
+  try {
+    const nuevos = await nube.leerSiCambio();
+    if (nuevos && !$dialogo.open) {
+      datos = { ...d.datosVacios(), ...nuevos };
+      pintar();
+    }
+  } catch {
+    // Sin conexión: se vuelve a intentar la próxima vez que abras la página.
+  }
+}
+
+nube.alCambiarEstado(async (estado) => {
+  if (estado === "conflicto") {
+    alert("Tus datos cambiaron en otro dispositivo. Tu último cambio no se guardó: revísalo y hazlo otra vez.");
+    if ($dialogo.open) $dialogo.close();
+    estadoNube = "guardado";
+    await entrar();
+    return;
+  }
+  estadoNube = estado;
+  pintarEstadoNube();
+});
 
 // Diálogos
 
@@ -471,6 +594,13 @@ const acciones = {
   },
   "agregar-linea": () => document.getElementById("lineas").insertAdjacentHTML("beforeend", lineaVenta()),
   cerrar: () => $dialogo.close(),
+  reintentar: iniciar,
+  salir: async () => {
+    if (nube.hayCambiosPorGuardar() && !confirm("Hay cambios sin guardar y se perderán. ¿Salir de todas formas?")) return;
+    await nube.cerrarSesion();
+    datos = d.datosVacios();
+    pantallaLogin();
+  },
   imprimir: () => window.print(),
   "descargar-respaldo": descargarRespaldo,
   "elegir-respaldo": () => document.getElementById("archivo-respaldo").click(),
@@ -497,6 +627,16 @@ document.addEventListener("change", (evento) => {
   if ($campo.id === "archivo-respaldo" && $campo.files[0]) restaurarRespaldo($campo.files[0]);
 });
 
-window.addEventListener("hashchange", pintar);
-navigator.storage?.persist?.();
-pintar();
+window.addEventListener("hashchange", () => {
+  if (!$menu.hidden) pintar();
+});
+window.addEventListener("online", () => nube.nubeActiva && nube.enviarPendiente());
+window.addEventListener("focus", traerCambiosDeOtroDispositivo);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) traerCambiosDeOtroDispositivo();
+});
+window.addEventListener("beforeunload", (evento) => {
+  if (nube.nubeActiva && nube.hayCambiosPorGuardar()) evento.preventDefault();
+});
+if (!nube.nubeActiva) navigator.storage?.persist?.();
+iniciar();

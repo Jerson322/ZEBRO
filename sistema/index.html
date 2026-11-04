@@ -45,6 +45,12 @@
       border-radius: 8px;
     }
     nav a:hover { color: #fff; }
+    nav[hidden] { display: none; }
+    nav .pie { margin-top: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; color: #aaa; }
+    .negativo-claro { color: #ff9c92; }
+    .acceso { max-width: 360px; margin: 10vh auto 0; display: flex; flex-direction: column; gap: 12px; }
+    .acceso h1 { letter-spacing: 2px; }
+    .acceso p { margin: 0; }
     nav a.activo { background: #fff; color: #000; font-weight: 600; }
     main { flex: 1; min-width: 0; padding: 24px; max-width: 1100px; }
     .encabezado {
@@ -138,6 +144,7 @@
       }
       nav .marca { padding: 10px 8px; font-size: 16px; }
       nav a { white-space: nowrap; padding: 10px 12px; }
+      nav .pie { margin: 0 0 0 auto; padding: 4px 8px; flex-direction: row; align-items: center; white-space: nowrap; }
       main { padding: 16px; }
       .linea { grid-template-columns: 1fr 60px 90px 32px; }
     }
@@ -155,6 +162,8 @@
     <main id="vista"></main>
   </div>
   <dialog id="dialogo"></dialog>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"
+    integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" crossorigin="anonymous"></script>
   <script type="module" src="/sistema/app.js"></script>
 </body>
 </html>
