@@ -162,6 +162,8 @@ export const agregarItem = (pedidoId, platoId, cantidad, opcionesIds, nota) =>
 export const quitarItem = (itemId) => rpc("quitar_item", { p_item: itemId });
 export const enviarCocina = (pedidoId) => rpc("enviar_cocina", { p_pedido: pedidoId });
 export const marcarItems = (pedidoId, de, a) => rpc("marcar_items", { p_pedido: pedidoId, p_de: de, p_a: a });
+// Marca entregado todo lo que se está preparando de un pedido.
+export const entregarPedido = (pedidoId) => rpc("entregar_pedido", { p_pedido: pedidoId });
 // Ya no se cobra propina: siempre va en 0.
 export const cobrar = (pedidoId, metodo) => rpc("cobrar", { p_pedido: pedidoId, p_metodo: metodo, p_propina: 0 });
 export const anular = (pedidoId, motivo) => rpc("anular", { p_pedido: pedidoId, p_motivo: motivo });

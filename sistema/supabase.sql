@@ -593,7 +593,15 @@ begin
   return v_total;
 end $$;
 
--- Cocina marca un pedido como listo; el mesero lo marca entregado.
+-- Cocina tiene un solo paso: todo lo que está preparándose de un pedido se marca entregado de una vez.
+create or replace function public.entregar_pedido(p_pedido uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform exigir_rol('admin', 'cajero', 'mesero', 'cocina', 'domiciliario');
+  update pedido_items set estado = 'entregado' where pedido_id = p_pedido and estado in ('cocina', 'listo');
+end $$;
+
+-- (Anterior) Cocina marca un pedido como listo; el mesero lo marca entregado.
 create or replace function public.marcar_items(p_pedido uuid, p_de text, p_a text) returns void
 language plpgsql security definer set search_path = public as $$
 begin
@@ -795,7 +803,7 @@ begin
     'abrir_mesa(uuid)', 'crear_domicilio(text, text, text, integer, uuid, text)', 'asignar_domiciliario(uuid, uuid)',
     'mi_empleado()', 'cambiar_entrega(uuid, text)', 'registrar_novedad(uuid, text)', 'registrar_recibido(uuid, integer)',
     'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid)', 'enviar_cocina(uuid)',
-    'marcar_items(uuid, text, text)', 'cobrar(uuid, text, integer)', 'anular(uuid, text)',
+    'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text)',
     'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()',
     'asignar_numero_domicilio()'] loop
     execute format('revoke all on function public.%s from public, anon', f);

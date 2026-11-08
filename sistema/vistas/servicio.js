@@ -33,7 +33,7 @@ function activarBotonesEntrega($raiz, ctx) {
     })
   );
 }
-const ESTADO_ITEM = { nuevo: "Sin enviar", cocina: "En cocina", listo: "¡Listo!", entregado: "Entregado" };
+const ESTADO_ITEM = { nuevo: "Sin enviar", cocina: "Preparando", listo: "Preparando", entregado: "Entregado" };
 
 const subtotal = (p) => p.pedido_items.reduce((s, i) => s + i.precio * i.cantidad, 0);
 const totalCuenta = (p) => subtotal(p) + (p.envio || 0);
@@ -283,7 +283,7 @@ export async function cuenta($vista, ctx, pedidoId) {
         ${abierta && items.length ? `<button class="ver-cuenta" id="ver-cuenta">${platosEnCuenta(items)} · Ver cuenta <strong>${pesos(totalMostrado(p))}</strong></button>` : ""}
         ${abierta ? `<div class="acciones-cuenta">
           ${hay("nuevo") && !esDomicilio ? `<button class="principal" id="enviar">Enviar a cocina</button>` : ""}
-          ${hay("listo") && rol !== "cocina" && !esDomicilio ? `<button id="entregar">Marcar entregados</button>` : ""}
+          ${(hay("cocina") || hay("listo")) && !esDomicilio ? `<button id="entregar">Marcar entregado</button>` : ""}
           ${items.length ? `<button id="precuenta">Imprimir cuenta</button>` : ""}
           ${puedeCobrar(rol) && items.length ? `<button class="principal" id="cobrar">${esDomicilio ? "Facturar" : "Cobrar"}</button>` : ""}
           ${rol === "admin" ? `<button class="peligro" id="anular">Anular cuenta</button>` : ""}
@@ -312,7 +312,7 @@ export async function cuenta($vista, ctx, pedidoId) {
   document.getElementById("enviar")?.addEventListener("click", () =>
     // Si la comandera está en este mismo equipo, imprime de una sin esperar el aviso en vivo.
     hecho(api.enviarCocina(p.id).then(() => ctx.imprimirPendientes()), "Enviado a cocina"));
-  document.getElementById("entregar")?.addEventListener("click", () => hecho(api.marcarItems(p.id, "listo", "entregado")));
+  document.getElementById("entregar")?.addEventListener("click", () => hecho(api.entregarPedido(p.id), "Pedido entregado"));
   const ticket = () => ticketCuenta(p, ctx.negocio, { mesa: titulo });
   document.getElementById("cobrar")?.addEventListener("click", () => formularioCobro(ctx, p, titulo));
   document.getElementById("precuenta")?.addEventListener("click", () => imprimir(ticket()));
