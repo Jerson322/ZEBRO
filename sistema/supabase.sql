@@ -153,6 +153,21 @@ create table if not exists public.pedidos (
   motivo_anulacion text
 );
 
+-- Los domicilios tienen su propia numeración (Domicilio #1, #2…), aparte del número de la venta.
+alter table public.pedidos add column if not exists numero_domicilio bigint;
+create sequence if not exists public.numero_domicilio_seq;
+with sin_numero as (
+  select id, row_number() over (order by creado) + coalesce((select max(numero_domicilio) from public.pedidos), 0) as n
+  from public.pedidos where tipo = 'domicilio' and numero_domicilio is null
+)
+update public.pedidos p set numero_domicilio = s.n from sin_numero s where p.id = s.id;
+do $$
+begin
+  perform setval('public.numero_domicilio_seq',
+    greatest(coalesce((select max(numero_domicilio) from public.pedidos), 0), 1),
+    (select max(numero_domicilio) from public.pedidos) is not null);
+end $$;
+
 create unique index if not exists una_cuenta_abierta_por_mesa
   on public.pedidos (mesa_id) where estado = 'abierto' and mesa_id is not null;
 create index if not exists pedidos_por_cierre on public.pedidos (cerrado);
@@ -302,8 +317,8 @@ begin
   if coalesce(trim(p_cliente), '') = '' or coalesce(trim(p_direccion), '') = '' then
     raise exception 'Escribe el cliente y la dirección';
   end if;
-  insert into pedidos (tipo, entrega, cliente, telefono, direccion, envio, domiciliario_id, notas)
-  values ('domicilio', 'preparando', trim(p_cliente), coalesce(trim(p_telefono), ''), trim(p_direccion),
+  insert into pedidos (tipo, numero_domicilio, entrega, cliente, telefono, direccion, envio, domiciliario_id, notas)
+  values ('domicilio', nextval('numero_domicilio_seq'), 'preparando', trim(p_cliente), coalesce(trim(p_telefono), ''), trim(p_direccion),
           greatest(coalesce(p_envio, 0), 0), p_domiciliario, coalesce(trim(p_notas), ''))
   returning id into v_id;
   return v_id;
@@ -578,6 +593,7 @@ begin
     select jsonb_build_object(
       'pedido_id', p.id,
       'numero', p.numero,
+      'numero_domicilio', p.numero_domicilio,
       'tipo', p.tipo,
       'mesa', m.nombre,
       'cliente', p.cliente,

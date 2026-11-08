@@ -21,7 +21,7 @@ export async function pintar($vista, ctx) {
   const costo = suma(pagados, (p) => p.costo);
   const propinas = suma(pagados, (p) => p.propina);
   const totalGastos = suma(gastos, (g) => g.valor);
-  const nombre = (p) => (p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa" : `Domicilio · ${p.cliente}`);
+  const nombre = (p) => (p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa" : `Domicilio #${p.numero_domicilio ?? p.numero} · ${p.cliente}`);
 
   const porMetodo = METODOS.map((m) => [m, suma(pagados.filter((p) => p.metodo_pago === m), (p) => p.total + p.propina)]).filter(([, v]) => v);
 

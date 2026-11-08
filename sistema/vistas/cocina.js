@@ -25,7 +25,7 @@ export async function pintar($vista, ctx) {
   const [abiertos, mesas] = await Promise.all([api.pedidosAbiertos(), api.mesas()]);
   const rol = ctx.perfil.rol;
   const nombre = (p) =>
-    p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa" : `Domicilio #${p.numero} · ${p.cliente}`;
+    p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa" : `Domicilio #${p.numero_domicilio ?? p.numero} · ${p.cliente}`;
   const con = (estado) =>
     abiertos.map((p) => ({ p, items: p.pedido_items.filter((i) => i.estado === estado) })).filter((x) => x.items.length);
 
@@ -47,7 +47,7 @@ export async function pintar($vista, ctx) {
     $b.addEventListener("click", () => {
       const { p, items } = con("cocina").find((x) => x.p.id === $b.dataset.reimprimir);
       imprimir(ticketComanda({
-        tipo: p.tipo, numero: p.numero, cliente: p.cliente, mesa: mesas.find((m) => m.id === p.mesa_id)?.nombre,
+        tipo: p.tipo, numero: p.numero, numero_domicilio: p.numero_domicilio, cliente: p.cliente, mesa: mesas.find((m) => m.id === p.mesa_id)?.nombre,
         enviado: items[0].creado, items,
       }));
     })

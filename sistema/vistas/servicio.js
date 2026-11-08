@@ -101,7 +101,7 @@ export async function domicilios($vista, ctx) {
   const nombreDe = (id) => equipo.find((e) => e.id === id)?.nombre ?? "Sin asignar";
   const textoEntrega = Object.fromEntries(ENTREGAS);
   const filas = abiertos.map((p) => `<button class="domicilio" data-pedido="${p.id}">
-      <span><strong>#${p.numero} ${esc(p.cliente)}</strong><br><small class="suave">${esc(p.direccion)}</small></span>
+      <span><strong>#${p.numero_domicilio ?? p.numero} ${esc(p.cliente)}</strong><br><small class="suave">${esc(p.direccion)}</small></span>
       <span class="num"><strong>${pesos(totalCuenta(p))}</strong><br>
         <small class="etiqueta">${textoEntrega[p.entrega] ?? ""}</small> <small class="suave">${esc(nombreDe(p.domiciliario_id))}</small></span>
     </button>`);
@@ -140,7 +140,7 @@ export async function cuenta($vista, ctx, pedidoId) {
   const rol = ctx.perfil.rol;
   const titulo = p.tipo === "mesa"
     ? listaMesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa"
-    : `Domicilio #${p.numero}`;
+    : `Domicilio #${p.numero_domicilio ?? p.numero}`;
   const abierta = p.estado === "abierto";
   const items = [...p.pedido_items].sort((a, b) => a.creado.localeCompare(b.creado));
   const hay = (estado) => items.some((i) => i.estado === estado);

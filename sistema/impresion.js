@@ -49,7 +49,7 @@ const detalleItem = (i) =>
 
 // Comanda para cocina: letra grande, sin precios.
 export function ticketComanda(c) {
-  const destino = c.tipo === "mesa" ? (c.mesa ?? "Mesa") : `DOMICILIO #${c.numero}`;
+  const destino = c.tipo === "mesa" ? (c.mesa ?? "Mesa") : `DOMICILIO #${c.numero_domicilio ?? c.numero}`;
   return `<div class="ticket comanda-ticket">
     <div class="t-grande">${esc(destino)}</div>
     ${c.tipo === "domicilio" && c.cliente ? `<div>${esc(c.cliente)}</div>` : ""}
@@ -75,7 +75,7 @@ export function ticketCuenta(p, negocio, { mesa, recibido } = {}) {
     ${negocio?.telefono ? `<div class="t-centro">Tel. ${esc(negocio.telefono)}</div>` : ""}
     <hr>
     <div>${pagada ? "Cuenta" : "PRE-CUENTA"} #${p.numero} · ${fechaHora(p.cerrado ?? new Date())}</div>
-    <div>${p.tipo === "mesa" ? esc(mesa ?? "Mesa") : `Domicilio: ${esc(p.cliente)}`}</div>
+    <div>${p.tipo === "mesa" ? esc(mesa ?? "Mesa") : `Domicilio #${p.numero_domicilio ?? p.numero}: ${esc(p.cliente)}`}</div>
     ${p.tipo === "domicilio" ? `<div>${esc(p.direccion)}</div><div>Tel. ${esc(p.telefono)}</div>` : ""}
     <hr>
     ${p.pedido_items.map((i) => fila(`${i.cantidad} × ${esc(i.nombre)}`, pesos(i.precio * i.cantidad)) + detalleItem(i)).join("")}
