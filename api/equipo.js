@@ -6,8 +6,11 @@ import { SUPABASE_URL } from "../sistema/config.js";
 const ROLES = ["admin", "cajero", "mesero", "cocina", "domiciliario"];
 const CLAVE_MINIMA = 8;
 
+// Sin espacios, saltos de línea ni comillas que se cuelan al pegarla en Vercel.
+const claveSecreta = () => String(process.env.SUPABASE_SECRET_KEY ?? "").trim().replace(/^["']|["']$/g, "");
+
 function cabeceras(extra = {}) {
-  const clave = process.env.SUPABASE_SECRET_KEY;
+  const clave = claveSecreta();
   // Las claves nuevas (sb_secret_…) van solo en "apikey"; la antigua service_role es un JWT y va en ambas.
   return {
     apikey: clave,
@@ -32,7 +35,7 @@ async function quienLlama(req) {
   const token = String(req.headers.authorization ?? "").replace(/^Bearer /, "");
   if (!token) return null;
   const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: { apikey: process.env.SUPABASE_SECRET_KEY, Authorization: `Bearer ${token}` },
+    headers: { apikey: claveSecreta(), Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return null;
   return (await res.json())?.id ?? null;
@@ -42,9 +45,12 @@ async function quienLlama(req) {
 async function motivoNoAdmin(userId) {
   const r = await supabase(`/rest/v1/miembros?user_id=eq.${userId}&select=rol,activo`);
   if (!r.ok) {
-    return r.status === 401 || r.status === 403
-      ? "La clave SUPABASE_SECRET_KEY de Vercel no es válida: debe ser la secret (sb_secret_…) o la service_role, no la publishable/anon"
-      : "No se pudo revisar tu rol en Supabase. Intenta de nuevo.";
+    // Lo que respondió Supabase (nunca incluye la clave) y cómo empieza la clave, para saber cuál es.
+    const detalle = r.data?.message || r.data?.msg || r.data?.error || JSON.stringify(r.data);
+    const clave = claveSecreta();
+    const tipo = clave.startsWith("sb_secret_") ? "secret" : clave.startsWith("sb_publishable_") ? "publishable"
+      : clave.startsWith("eyJ") ? "JWT (anon o service_role)" : "desconocido";
+    return `Supabase rechazó la clave de Vercel (${r.status}, tipo ${tipo}): ${detalle}`;
   }
   const miembro = r.data[0];
   if (!miembro) {
@@ -65,7 +71,7 @@ const fallo = (res, status, error) => res.status(status).json({ error });
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return fallo(res, 405, "Método no permitido");
-  if (!SUPABASE_URL || !process.env.SUPABASE_SECRET_KEY) {
+  if (!SUPABASE_URL || !claveSecreta()) {
     return fallo(res, 500, "Falta configurar SUPABASE_SECRET_KEY en Vercel");
   }
   const llamador = await quienLlama(req);
