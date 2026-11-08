@@ -431,30 +431,112 @@ function tocarPlato(ctx, pedidoId, $boton) {
   }, ESPERA_TOQUES_MS);
 }
 
-// Al tocar un plato: si no tiene modificadores se agrega de una; si tiene, se eligen primero.
+// Plato con modificadores (sabores, borde, adiciones…): ventana para elegirlos. Con cantidad 2 o
+// más, cada unidad tiene sus propias opciones (ej. 2 personales: una Hawaiana y otra Criolla).
+// Las unidades iguales se agregan juntas («2×»); las distintas, en líneas separadas.
 function elegirPlato(ctx, pedidoId, platoId) {
   const { platos, grupos, opciones: todas, platoGrupos } = ctx.menu;
   const plato = platos.find((pl) => pl.id === platoId);
   const susGrupos = grupos.filter((g) => platoGrupos.some((pg) => pg.plato_id === platoId && pg.grupo_id === g.id));
   if (!susGrupos.length) return;
-  const bloques = susGrupos.map((g) => {
-    const tipo = g.maximo === 1 ? "radio" : "checkbox";
-    const regla = `${g.obligatorio ? "Obligatorio" : "Opcional"}${g.maximo > 1 ? ` · hasta ${g.maximo}` : ""}`;
-    const items = todas.filter((o) => o.grupo_id === g.id).map((o) => `<label class="opcion">
-        <input type="${tipo}" name="g-${g.id}" value="${o.id}"> ${esc(o.nombre)}${o.precio ? ` <span class="suave">+${pesos(o.precio)}</span>` : ""}
-      </label>`).join("");
-    return `<fieldset><legend>${esc(g.nombre)} <small class="suave">${regla}</small></legend>${items}</fieldset>`;
-  }).join("");
-  formulario(esc(plato.nombre), `${bloques}
-    <div class="fila">
-      <label>Cantidad<input name="cantidad" type="number" min="1" step="1" value="1"></label>
-      <label>Nota<input name="nota" placeholder="Ej. sin cebolla"></label>
-    </div>`,
-    (c, $form) => {
-      const elegidas = [...$form.querySelectorAll("fieldset input:checked")].map(($i) => $i.value);
-      return api.agregarItem(pedidoId, platoId, Number(c.cantidad), elegidas, c.nota);
+  const opcionesDe = (g) => todas.filter((o) => o.grupo_id === g.id);
+  // Lo elegido en cada unidad: { opciones: Set(id), nota }.
+  const unidades = [{ opciones: new Set(), nota: "" }];
+  const precioUnidad = (u) => plato.precio + todas.filter((o) => u.opciones.has(o.id)).reduce((s, o) => s + o.precio, 0);
+
+  const bloque = (u, k) => {
+    const grupos = susGrupos.map((g) => {
+      const tipo = g.maximo === 1 ? "radio" : "checkbox";
+      const regla = `${g.obligatorio ? "Obligatorio" : "Opcional"}${g.maximo > 1 ? ` · hasta ${g.maximo}` : ""}`;
+      const items = opcionesDe(g).map((o) => `<label class="opcion">
+          <input type="${tipo}" name="u${k}-g-${g.id}" value="${o.id}" data-unidad="${k}" data-grupo="${g.id}"${u.opciones.has(o.id) ? " checked" : ""}>
+          ${esc(o.nombre)}${o.precio ? ` <span class="suave">+${pesos(o.precio)}</span>` : ""}</label>`).join("");
+      return `<fieldset><legend>${esc(g.nombre)} <small class="suave">${regla}</small></legend>${items}</fieldset>`;
+    }).join("");
+    return `<div class="${unidades.length > 1 ? "panel" : ""}" style="margin:0;display:flex;flex-direction:column;gap:10px">
+      ${unidades.length > 1 ? `<div class="mc-titulo"><span>${esc(plato.nombre)} ${k + 1}</span>
+        <span class="suave">${pesos(precioUnidad(u))}</span></div>` : ""}
+      ${grupos}
+      <label>Nota${unidades.length > 1 ? ` de la ${k + 1}` : ""}<input data-nota="${k}" value="${esc(u.nota)}" placeholder="Ej. sin cebolla"></label>
+    </div>`;
+  };
+
+  const $form = formulario(esc(plato.nombre), `
+    <div class="fila" style="align-items:end">
+      <label>Cantidad
+        <span class="botones-domicilio" style="justify-content:flex-start;margin:0">
+          <button type="button" class="chico" id="menos" aria-label="Una menos">−</button>
+          <strong id="cantidad" style="min-width:28px;text-align:center;font-size:18px">1</strong>
+          <button type="button" class="chico" id="mas" aria-label="Una más">+</button>
+        </span></label>
+      <button type="button" class="chico" id="copiar" hidden>Copiar las opciones de la 1 a todas</button>
+    </div>
+    <div id="unidades" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div class="total"><span>Total</span><span id="total-plato"></span></div>`,
+    async () => {
+      // Cada unidad debe cumplir las reglas de sus grupos; se avisa cuál está incompleta.
+      unidades.forEach((u, k) => {
+        for (const g of susGrupos) {
+          const n = opcionesDe(g).filter((o) => u.opciones.has(o.id)).length;
+          const cual = unidades.length > 1 ? ` (${plato.nombre} ${k + 1})` : "";
+          if (g.obligatorio && !n) throw new Error(`Elige ${g.nombre}${cual}`);
+          if (n > g.maximo) throw new Error(`En ${g.nombre} puedes elegir máximo ${g.maximo}${cual}`);
+        }
+      });
+      // Las unidades iguales se agregan juntas.
+      const juntas = new Map();
+      for (const u of unidades) {
+        const opciones = [...u.opciones].sort();
+        const clave = JSON.stringify([opciones, u.nota.trim()]);
+        const grupo = juntas.get(clave) ?? { opciones, nota: u.nota.trim(), cantidad: 0 };
+        grupo.cantidad += 1;
+        juntas.set(clave, grupo);
+      }
+      for (const g of juntas.values()) await api.agregarItem(pedidoId, platoId, g.cantidad, g.opciones, g.nota);
     },
     { boton: "Agregar", alTerminar: () => ctx.refrescar() });
+
+  const $unidades = $form.querySelector("#unidades");
+  const pintar = () => {
+    $unidades.innerHTML = unidades.map(bloque).join("");
+    $form.querySelector("#cantidad").textContent = unidades.length;
+    $form.querySelector("#copiar").hidden = unidades.length < 2;
+    $form.querySelector("#total-plato").textContent = pesos(unidades.reduce((s, u) => s + precioUnidad(u), 0));
+    $form.querySelector('[type="submit"]').textContent = unidades.length > 1 ? `Agregar ${unidades.length}` : "Agregar";
+  };
+  $unidades.addEventListener("change", (e) => {
+    const $i = e.target;
+    if ($i.dataset.nota !== undefined) return;
+    const u = unidades[Number($i.dataset.unidad)];
+    if (!u) return;
+    if ($i.type === "radio") {
+      // Elegir uno en un grupo de «elegir 1» quita el anterior de ese grupo.
+      opcionesDe({ id: $i.dataset.grupo }).forEach((o) => u.opciones.delete(o.id));
+    }
+    if ($i.checked) u.opciones.add($i.value);
+    else u.opciones.delete($i.value);
+    pintar();
+  });
+  $unidades.addEventListener("input", (e) => {
+    if (e.target.dataset.nota !== undefined) unidades[Number(e.target.dataset.nota)].nota = e.target.value;
+  });
+  $form.querySelector("#mas").addEventListener("click", () => {
+    unidades.push({ opciones: new Set(), nota: "" });
+    pintar();
+    $unidades.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
+  $form.querySelector("#menos").addEventListener("click", () => {
+    if (unidades.length > 1) unidades.pop();
+    pintar();
+  });
+  $form.querySelector("#copiar").addEventListener("click", () => {
+    for (const u of unidades.slice(1)) {
+      u.opciones = new Set(unidades[0].opciones);
+      u.nota = unidades[0].nota;
+    }
+    pintar();
+  });
+  pintar();
 }
 
 // Cobro normal: todo lo que falta, con un solo método. Si pagan por separado, «Multicuenta».
