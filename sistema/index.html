@@ -249,6 +249,9 @@
 
     /* Cuenta de una mesa */
     .cuenta { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr); gap: 20px; align-items: start; }
+    /* Nada dentro de la cuenta puede ensanchar la página: la barra de categorías se desliza sola */
+    .carta, .resumen, .pestanas { min-width: 0; max-width: 100%; }
+    .plato strong, .item > div, .item > span:first-child { overflow-wrap: anywhere; min-width: 0; }
     .resumen { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 14px; scroll-margin-top: 76px; }
     .resumen .panel { margin-bottom: 0; }
     .platos { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
@@ -363,7 +366,7 @@
     #aviso[hidden] { display: none; }
 
     @media (max-width: 960px) {
-      .cuenta { grid-template-columns: 1fr; padding-bottom: 70px; }
+      .cuenta { grid-template-columns: minmax(0, 1fr); padding-bottom: 70px; }
       .resumen { position: static; }
       .ver-cuenta {
         display: flex; justify-content: space-between; position: fixed; left: 16px; right: 16px; z-index: 5;
@@ -407,14 +410,18 @@
       .secciones .icono { width: 22px; height: 22px; }
       main { padding: calc(76px + env(safe-area-inset-top)) 16px calc(100px + env(safe-area-inset-bottom)); }
       h1 { font-size: 22px; }
-      .mesas { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+      .mesas { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .mesa { min-height: 112px; padding: 14px; }
-      .platos { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+      .platos { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .acciones-cuenta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .acciones-cuenta button { white-space: normal; }
       .fila { grid-template-columns: 1fr; }
-      .tarjetas { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+      .tarjetas { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .tarjeta { padding: 14px; }
       .tarjeta strong { font-size: 19px; }
-      .columnas { grid-template-columns: 1fr; }
+      .columnas { grid-template-columns: minmax(0, 1fr); }
+      /* Último seguro: la página nunca se desliza de lado en el celular */
+      main { overflow-x: clip; }
       .panel { padding: 14px; }
       .ver-cuenta { bottom: calc(84px + env(safe-area-inset-bottom)); }
       /* Tablas como tarjetas: cada fila es un bloque y cada dato muestra su nombre */
