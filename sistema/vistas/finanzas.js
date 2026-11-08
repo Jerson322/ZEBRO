@@ -2,6 +2,7 @@
 // El cajero ve y registra; el reporte con costos y utilidad es solo para el administrador.
 import * as api from "../api.js";
 import { esc, pesos, opciones, tabla, tarjeta, formulario, hoy, hora, fechaCorta, aviso } from "../util.js";
+import { exportarVentasYGastos } from "../excel.js";
 
 const CATEGORIAS_GASTO = ["Mercado", "Arriendo", "Servicios", "Nómina", "Transporte", "Publicidad", "Mantenimiento", "Impuestos", "Otros"];
 const METODOS = ["Efectivo", "Tarjeta", "Transferencia", "Nequi", "Daviplata"];
@@ -40,6 +41,7 @@ export async function pintar($vista, ctx) {
     <div class="filtros">
       <label>Desde<input type="date" data-periodo="desde" value="${periodo.desde}"></label>
       <label>Hasta<input type="date" data-periodo="hasta" value="${periodo.hasta}"></label>
+      <button id="exportar-excel" style="align-self:end">Exportar a Excel</button>
     </div>
     <div class="tarjetas">
       ${tarjeta(`Ventas (${pagados.length})`, pesos(ventas))}
@@ -74,6 +76,22 @@ export async function pintar($vista, ctx) {
       ctx.refrescar();
     })
   );
+  $vista.querySelector("#exportar-excel").addEventListener("click", async (evento) => {
+    const $b = evento.currentTarget;
+    $b.disabled = true;
+    $b.textContent = "Preparando…";
+    try {
+      await exportarVentasYGastos({
+        desde: periodo.desde, hasta: periodo.hasta, cerrados, gastos, nombreCuenta: nombre, negocio: ctx.negocio, admin,
+      });
+      aviso("Excel descargado");
+    } catch {
+      aviso("No se pudo crear el Excel. Revisa tu conexión e inténtalo de nuevo.");
+    } finally {
+      $b.disabled = false;
+      $b.textContent = "Exportar a Excel";
+    }
+  });
   $vista.querySelectorAll("[data-borrar-gasto]").forEach(($b) =>
     $b.addEventListener("click", async () => {
       if (!confirm("¿Borrar este gasto?")) return;
