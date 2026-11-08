@@ -3,6 +3,7 @@
 import * as api from "../api.js";
 import { esc, pesos, opciones, tabla, tarjeta, formulario, hoy, hora, fechaCorta, aviso } from "../util.js";
 import { exportarVentasYGastos } from "../excel.js";
+import { abrirCierre } from "../cierre.js";
 
 const CATEGORIAS_GASTO = ["Mercado", "Arriendo", "Servicios", "Nómina", "Transporte", "Publicidad", "Mantenimiento", "Impuestos", "Otros"];
 const METODOS = ["Efectivo", "Tarjeta", "Transferencia", "Nequi", "Daviplata"];
@@ -37,7 +38,9 @@ export async function pintar($vista, ctx) {
   }
 
   $vista.innerHTML = `
-    <div class="encabezado"><h1>Ventas y gastos</h1><button class="principal" id="nuevo-gasto">Registrar gasto</button></div>
+    <div class="encabezado"><h1>Ventas y gastos</h1>
+      <div class="botones-domicilio" style="margin:0"><button id="cierre-caja">Cierre de caja</button>
+        <button class="principal" id="nuevo-gasto">Registrar gasto</button></div></div>
     <div class="filtros">
       <label>Desde<input type="date" data-periodo="desde" value="${periodo.desde}"></label>
       <label>Hasta<input type="date" data-periodo="hasta" value="${periodo.hasta}"></label>
@@ -76,6 +79,7 @@ export async function pintar($vista, ctx) {
       ctx.refrescar();
     })
   );
+  $vista.querySelector("#cierre-caja").addEventListener("click", () => abrirCierre(ctx));
   $vista.querySelector("#exportar-excel").addEventListener("click", async (evento) => {
     const $b = evento.currentTarget;
     $b.disabled = true;

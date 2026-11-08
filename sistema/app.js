@@ -1,6 +1,6 @@
 // Armazón del sistema: sesión, menú según el rol, navegación y actualizaciones en vivo.
 import * as api from "./api.js";
-import { esc, dialogoAbierto, aviso } from "./util.js";
+import { esc, dialogoAbierto, aviso, mostrar, cerrarDialogo } from "./util.js";
 import * as servicio from "./vistas/servicio.js";
 import * as cocina from "./vistas/cocina.js";
 import * as menu from "./vistas/menu.js";
@@ -10,6 +10,7 @@ import * as equipo from "./vistas/equipo.js";
 import * as ajustes from "./vistas/ajustes.js";
 import { preferencia, guardarPreferencia, imprimir, ticketComanda } from "./impresion.js";
 import { iconos } from "./iconos.js";
+import { abrirCierre } from "./cierre.js";
 
 const SECCIONES = [
   { id: "mesas", nombre: "Mesas", vista: servicio.mesas, roles: ["admin", "cajero", "mesero", "domiciliario"], enVivo: true },
@@ -111,7 +112,7 @@ async function pintarAhora() {
         <span class="quien"><strong>${esc(ctx.perfil.nombre)}</strong><small>${ROLES[ctx.perfil.rol]}</small></span>
         <button class="icono-boton" id="salir" title="Salir" aria-label="Salir">${iconos.salir}</button></div>
     </div>`;
-  document.getElementById("salir").addEventListener("click", salir);
+  document.getElementById("salir").addEventListener("click", elegirSalida);
   document.getElementById("usar-comandera").addEventListener("change", (evento) => {
     guardarPreferencia("comandas", evento.target.checked);
     aviso(evento.target.checked
@@ -279,6 +280,23 @@ function mostrarBienvenida() {
     clearTimeout(temporizador);
     quitar();
   });
+}
+
+// Al salir, la caja (administrador y cajero) puede cerrar el día: imprime el cierre de caja y
+// luego cierra la sesión. Los demás roles salen directo.
+function elegirSalida() {
+  if (!["admin", "cajero"].includes(ctx.perfil?.rol)) return salir();
+  const $c = mostrar(`<h2>¿Cómo quieres salir?</h2>
+    <button type="button" class="principal" id="salida-cierre">Cerrar caja del día</button>
+    <p class="suave" style="margin:-6px 0 0">Imprime el resumen de lo vendido, el dinero por método, los gastos y el efectivo que debe haber en caja.</p>
+    <button type="button" id="salida-sesion">Solo cerrar sesión</button>
+    <button type="button" id="salida-cancelar">Cancelar</button>`);
+  $c.querySelector("#salida-cierre").addEventListener("click", () => abrirCierre(ctx, { conSalida: true, salir }));
+  $c.querySelector("#salida-sesion").addEventListener("click", () => {
+    cerrarDialogo();
+    salir();
+  });
+  $c.querySelector("#salida-cancelar").addEventListener("click", cerrarDialogo);
 }
 
 async function salir() {
