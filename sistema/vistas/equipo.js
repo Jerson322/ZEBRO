@@ -1,27 +1,28 @@
-// Empleados (solo administrador): ficha de cada persona y su acceso al sistema.
+// Empleados (solo administrador): nombre, rol y acceso al sistema.
 import * as api from "../api.js";
-import { esc, pesos, opciones, tabla, formulario, fechaCorta, aviso } from "../util.js";
+import { esc, opciones, tabla, formulario, aviso } from "../util.js";
 
-const ROLES = [["mesero", "Mesero: mesas y pedidos"], ["cajero", "Cajero: cobra, domicilios y gastos"], ["cocina", "Cocina: solo ve comandas"], ["admin", "Administrador: todo"]];
+// El rol del empleado se guarda en "cargo". Los que tienen acceso usan el rol del sistema equivalente.
+const ROLES_EMPLEADO = ["Mesero", "Cajero", "Cocina", "Domiciliario", "Administrador"];
+const ROL_SISTEMA = { Mesero: "mesero", Cajero: "cajero", Cocina: "cocina", Administrador: "admin" };
 const NOMBRE_ROL = { mesero: "Mesero", cajero: "Cajero", cocina: "Cocina", admin: "Administrador" };
+const ROLES_ACCESO = [["mesero", "Mesero: mesas y pedidos"], ["cajero", "Cajero: cobra, domicilios y gastos"], ["cocina", "Cocina: solo ve comandas"], ["admin", "Administrador: todo"]];
 
 export async function pintar($vista, ctx) {
   const [empleados, miembros] = await Promise.all([api.empleados(), api.miembros()]);
   const acceso = (e) => miembros.find((m) => m.user_id === e.user_id && m.activo);
   const sinFicha = miembros.filter((m) => m.activo && !empleados.some((e) => e.user_id === m.user_id));
-  const nomina = empleados.filter((e) => e.activo).reduce((s, e) => s + e.salario, 0);
 
   $vista.innerHTML = `
     <div class="encabezado"><h1>Empleados</h1><button class="principal" id="nuevo-empleado">Nuevo empleado</button></div>
-    <div class="panel">${tabla(["Nombre", "Cargo", "Teléfono", "Ingreso", "#Salario", "Acceso al sistema", ""], empleados.map((e) => {
+    <div class="panel">${tabla(["Nombre", "Rol", "Acceso al sistema", ""], empleados.map((e) => {
       const m = acceso(e);
       return `<tr class="${e.activo ? "" : "inactivo"}"><td class="ancho">${esc(e.nombre)}${e.activo ? "" : ` <small class="etiqueta">Retirado</small>`}</td>
-        <td>${esc(e.cargo)}</td><td>${esc(e.telefono)}</td><td>${fechaCorta(e.ingreso)}</td><td class="num">${pesos(e.salario)}</td>
-        <td>${m ? `<span class="etiqueta">${NOMBRE_ROL[m.rol]}</span>` : `<small class="suave">Sin acceso</small>`}</td>
+        <td>${esc(e.cargo)}</td>
+        <td>${m ? `<span class="etiqueta">Entra como ${NOMBRE_ROL[m.rol]}</span>` : `<small class="suave">Sin acceso</small>`}</td>
         <td class="acciones"><button class="chico" data-acceso="${e.id}">Acceso</button>
           <button class="chico" data-editar="${e.id}">Editar</button></td></tr>`;
-    }), "Agrega a tu equipo.")}
-      ${empleados.length ? `<p class="suave">Nómina mensual de empleados activos: <strong>${pesos(nomina)}</strong></p>` : ""}</div>
+    }), "Agrega a tu equipo.")}</div>
     ${sinFicha.length ? `<div class="panel"><h2>Otros accesos</h2>
       ${tabla(["Nombre", "Rol"], sinFicha.map((m) => `<tr><td>${esc(m.nombre)}${m.user_id === ctx.perfil.user_id ? " (tú)" : ""}</td><td>${NOMBRE_ROL[m.rol]}</td></tr>`), "")}</div>` : ""}`;
 
@@ -38,43 +39,31 @@ export async function pintar($vista, ctx) {
 
 function formularioEmpleado(e, ctx) {
   formulario(e.id ? "Editar empleado" : "Nuevo empleado", `
-    <div class="fila">
-      <label>Nombre<input name="nombre" value="${esc(e.nombre)}"></label>
-      <label>Cargo<input name="cargo" value="${esc(e.cargo)}" placeholder="Ej. Mesero, Cocinero, Domiciliario"></label>
-    </div>
-    <div class="fila">
-      <label>Documento<input name="documento" value="${esc(e.documento)}"></label>
-      <label>Teléfono<input name="telefono" type="tel" value="${esc(e.telefono)}"></label>
-    </div>
-    <div class="fila">
-      <label>Salario mensual<input name="salario" type="number" min="0" step="1000" value="${e.salario ?? 0}"></label>
-      <label>Fecha de ingreso<input name="ingreso" type="date" value="${e.ingreso ?? ""}"></label>
-    </div>
-    <label>Notas<input name="notas" value="${esc(e.notas)}" placeholder="Ej. EPS, contacto de emergencia, turnos"></label>
+    <label>Nombre<input name="nombre" value="${esc(e.nombre)}"></label>
+    <label>Rol<select name="cargo">${opciones(ROLES_EMPLEADO, e.cargo || "Mesero")}</select></label>
     ${e.id ? `<label class="opcion"><input type="checkbox" name="activo"${e.activo ? " checked" : ""}> Trabaja actualmente</label>` : ""}`,
     async (c) => {
       if (!c.nombre.trim()) throw new Error("Escribe el nombre");
-      const salario = Number(c.salario || 0);
-      if (!Number.isInteger(salario) || salario < 0) throw new Error("El salario debe ser un número entero");
-      await api.guardar("empleados", {
-        id: e.id, nombre: c.nombre.trim(), cargo: c.cargo.trim(), documento: c.documento.trim(), telefono: c.telefono.trim(),
-        salario, ingreso: c.ingreso || null, notas: c.notas.trim(), activo: e.id ? Boolean(c.activo) : true,
-      });
-      // Si se retira, pierde el acceso al sistema.
-      if (e.id && !c.activo && e.user_id) await api.cuentaEquipo({ accion: "quitar", empleadoId: e.id });
+      const activo = e.id ? Boolean(c.activo) : true;
+      await api.guardar("empleados", { id: e.id, nombre: c.nombre.trim(), cargo: c.cargo, activo });
+      if (!e.id || !e.user_id) return;
+      // Si se retira, pierde el acceso; si cambia de rol y tiene acceso, entra con el rol nuevo.
+      if (!activo) await api.cuentaEquipo({ accion: "quitar", empleadoId: e.id });
+      else if (c.cargo !== e.cargo && ROL_SISTEMA[c.cargo]) await api.cuentaEquipo({ accion: "rol", empleadoId: e.id, rol: ROL_SISTEMA[c.cargo] });
     },
     { alTerminar: () => ctx.refrescar() });
 }
 
 function formularioAcceso(e, miembro, ctx) {
   const tieneCuenta = Boolean(e.user_id);
+  const rolSugerido = miembro?.rol ?? ROL_SISTEMA[e.cargo] ?? "mesero";
   formulario(`Acceso de ${esc(e.nombre)}`, `
     ${!tieneCuenta ? `<p class="suave" style="margin:0">Crea un usuario para que ${esc(e.nombre)} entre al sistema desde su celular.</p>
       <div class="fila">
         <label>Correo<input name="correo" type="email" autocomplete="off"></label>
         <label>Clave (mínimo 8)<input name="clave" type="text" autocomplete="off"></label>
       </div>` : `<p class="suave" style="margin:0">${miembro ? "Tiene acceso al sistema." : "Su acceso está desactivado."}</p>`}
-    <label>Rol<select name="rol">${opciones(ROLES, miembro?.rol ?? "mesero")}</select></label>
+    <label>Entra como<select name="rol">${opciones(ROLES_ACCESO, rolSugerido)}</select></label>
     ${tieneCuenta ? `<label>Nueva clave (opcional, mínimo 8)<input name="clave" type="text" autocomplete="off"></label>
       ${miembro ? `<label class="opcion"><input type="checkbox" name="quitar"> Quitar el acceso</label>` : ""}` : ""}`,
     async (c) => {
