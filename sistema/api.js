@@ -124,6 +124,8 @@ export const guardar = (tabla, fila) =>
     : resultado(sb.from(tabla).insert(fila));
 
 export const guardarDevolviendo = (tabla, fila) => resultado(sb.from(tabla).insert(fila).select().single());
+// Inserta varias filas de una vez y devuelve las filas creadas (con su id).
+export const guardarVarios = (tabla, filas) => resultado(sb.from(tabla).insert(filas).select());
 
 export const borrar = (tabla, id) => resultado(sb.from(tabla).delete().eq("id", id));
 
