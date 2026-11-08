@@ -593,8 +593,10 @@ async function despuesDeCobrar(ctx, p, titulo, resultado, metodo, recibido, impr
 }
 
 // Multicuenta: los productos que faltan por pagar se reparten entre varias cuentas (una por
-// persona) arrastrándolos, o tocando el producto y luego la cuenta. Cada cuenta se cobra
-// aparte, con su propio método. El envío se suma a la última cuenta que se cobre.
+// persona) arrastrándolos, o tocando el producto y luego la cuenta. Un producto también se puede
+// dividir entre todas las cuentas (ej. una gourmet entre 2: $12.500 cada una). Cada cuenta se
+// cobra aparte, con su propio método. La última cuenta que se cobra se lleva lo que falte
+// (incluido el envío), así la suma siempre cuadra.
 function multicuenta(ctx, pedidoInicial, titulo) {
   const $dialogo = document.getElementById("dialogo");
   let p = pedidoInicial;
@@ -602,24 +604,38 @@ function multicuenta(ctx, pedidoInicial, titulo) {
   let siguiente = 1;
   const nuevaCuenta = () => ({ numero: siguiente++, platos: new Map(), metodo: METODOS[0], recibido: "" });
   let cuentas = [nuevaCuenta(), nuevaCuenta()];
-  let elegida = null; // { item, desde } cuando se toca un producto para moverlo
+  // Productos divididos: una unidad repartida en partes de dinero, una por cuenta.
+  // { id, item, nombre, partes: Map(número de cuenta → { valor, pagado }) }
+  let divididos = [];
+  let siguienteDivision = 1;
+  let elegida = null; // { item, desde } cuando se toca un producto para moverlo o dividirlo
   let imprimirTickets = preferencia("cuenta");
   let cobrando = false;
 
   const pendientes = () => p.pedido_items.filter((i) => !i.pago_id).sort((a, b) => a.creado.localeCompare(b.creado));
+  const falta = () => totalCuenta(p) - (p.pagos ?? []).reduce((s, x) => s + x.valor, 0);
   const enCuentas = (id) => cuentas.reduce((s, c) => s + (c.platos.get(id) ?? 0), 0);
-  const unidadesDe = (c) => [...c.platos.values()].reduce((s, n) => s + n, 0);
-  const totalUnidades = () => pendientes().reduce((s, i) => s + i.cantidad, 0);
-  const totalDe = (c) => {
+  const divididosDe = (id) => divididos.filter((d) => d.item === id).length;
+  const sinAsignarDe = (item) => item.cantidad - enCuentas(item.id) - divididosDe(item.id);
+  const partesDe = (c) => divididos.flatMap((d) => {
+    const parte = d.partes.get(c.numero);
+    return parte && !parte.pagado ? [{ d, ...parte }] : [];
+  });
+  const sumaPlatos = (c) => {
     const items = pendientes();
-    const suma = [...c.platos].reduce((s, [id, n]) => s + n * (items.find((i) => i.id === id)?.precio ?? 0), 0);
-    // La cuenta que se lleva todo lo que falta también lleva el envío.
-    return suma + (unidadesDe(c) && unidadesDe(c) === totalUnidades() ? p.envio || 0 : 0);
+    return [...c.platos].reduce((s, [id, n]) => s + n * (items.find((i) => i.id === id)?.precio ?? 0), 0);
   };
+  const tieneAlgo = (c) => [...c.platos.values()].some((n) => n > 0) || partesDe(c).length > 0;
+  // Es la última si, después de ella, ya no queda nada por asignar ni por cobrar en otras cuentas.
+  const esUltima = (c) => tieneAlgo(c)
+    && pendientes().every((i) => sinAsignarDe(i) <= 0)
+    && cuentas.every((o) => o === c || !tieneAlgo(o));
+  const totalDe = (c) => (esUltima(c) ? falta() : sumaPlatos(c) + partesDe(c).reduce((s, x) => s + x.valor, 0));
 
   // Tras un pago los platos cambian (se separan o desaparecen): se ajustan las cuentas.
   const ajustar = () => {
     const items = pendientes();
+    divididos = divididos.filter((d) => items.some((i) => i.id === d.item) || [...d.partes.values()].some((x) => x.pagado));
     for (const c of cuentas) {
       for (const [id, n] of [...c.platos]) {
         const item = items.find((i) => i.id === id);
@@ -628,7 +644,7 @@ function multicuenta(ctx, pedidoInicial, titulo) {
       }
     }
     for (const item of items) {
-      let sobra = enCuentas(item.id) - item.cantidad;
+      let sobra = -sinAsignarDe(item);
       for (const c of [...cuentas].reverse()) {
         if (sobra <= 0) break;
         const quita = Math.min(sobra, c.platos.get(item.id) ?? 0);
@@ -641,18 +657,26 @@ function multicuenta(ctx, pedidoInicial, titulo) {
   const ficha = (item, desde) => `<button type="button" class="mc-ficha${elegida && elegida.item === item.id && elegida.desde === desde ? " elegida" : ""}"
       data-item="${item.id}" data-desde="${desde}">${esc(item.nombre)}<small>${pesos(item.precio)}</small></button>`;
   const fichas = (lista) => lista.flatMap(([item, n, desde]) => Array.from({ length: n }, () => ficha(item, desde))).join("");
+  const fichaParte = (x, conDeshacer) => `<span class="mc-ficha mc-parte">${esc(x.d.nombre)} <small>1/${x.d.partes.size} · ${pesos(x.valor)}</small>
+      ${conDeshacer ? `<button type="button" class="icono-boton" data-deshacer="${x.d.id}" aria-label="Deshacer división" style="padding:0 0 0 4px">✕</button>` : ""}</span>`;
 
   function pintar() {
     ajustar();
     const items = pendientes();
-    const sinAsignar = items.map((i) => [i, i.cantidad - enCuentas(i.id), -1]).filter(([, n]) => n > 0);
+    const sinAsignar = items.map((i) => [i, sinAsignarDe(i), -1]).filter(([, n]) => n > 0);
     const totalSin = sinAsignar.reduce((s, [i, n]) => s + i.precio * n, 0);
+    const itemElegido = elegida && items.find((i) => i.id === elegida.item);
     const $c = mostrar(`
       <div class="mc-cabeza">
         <h2>Multicuenta · ${esc(titulo)}</h2>
         <button type="button" class="icono-boton" id="mc-cerrar" aria-label="Cerrar">✕</button>
       </div>
-      <p class="suave" style="margin:0">Arrastra cada producto a la cuenta de quien lo paga. En el celular también puedes tocar el producto y después la cuenta.</p>
+      <p class="suave" style="margin:0">Arrastra cada producto a la cuenta de quien lo paga. En el celular también puedes tocar el producto y después la cuenta.
+        Si un producto lo pagan entre varios, tócalo y usa «Dividir entre las cuentas».</p>
+      ${itemElegido ? `<div class="mc-zona" style="border-style:solid;border-color:var(--acento);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span>Elegiste <strong>${esc(itemElegido.nombre)}</strong> (${pesos(itemElegido.precio)})</span>
+        <button type="button" class="principal chico" id="mc-dividir">÷ Dividir entre las ${cuentas.length} cuentas (${pesos(Math.floor(itemElegido.precio / cuentas.length / 100) * 100)} c/u)</button>
+        <button type="button" class="chico" id="mc-soltar">Cancelar</button></div>` : ""}
       <div class="mc-zona mc-sin" data-zona="-1">
         <div class="mc-titulo"><span>Sin asignar</span><span class="suave">${pesos(totalSin)}</span></div>
         <div class="mc-fichas">${sinAsignar.length ? fichas(sinAsignar) : `<p class="mc-vacia">Todo está repartido ✓</p>`}</div>
@@ -660,17 +684,20 @@ function multicuenta(ctx, pedidoInicial, titulo) {
       <div class="mc-cuentas">
         ${cuentas.map((c, k) => {
           const lista = items.map((i) => [i, c.platos.get(i.id) ?? 0, k]).filter(([, n]) => n > 0);
+          const partes = partesDe(c);
           const total = totalDe(c);
           const recibido = Number(c.recibido) || 0;
           return `<div class="mc-zona mc-cuenta" data-zona="${k}">
             <div class="mc-titulo"><span>Cuenta ${c.numero}</span>
-              ${cuentas.length > 1 ? `<button type="button" class="icono-boton" data-quitar-cuenta="${k}" aria-label="Quitar cuenta">✕</button>` : ""}</div>
-            <div class="mc-fichas">${lista.length ? fichas(lista) : `<p class="mc-vacia">Suelta aquí los productos</p>`}</div>
-            <div class="mc-total"><span class="suave">Total</span><strong>${pesos(total)}</strong></div>
+              ${cuentas.length > 1 && !partes.length ? `<button type="button" class="icono-boton" data-quitar-cuenta="${k}" aria-label="Quitar cuenta">✕</button>` : ""}</div>
+            <div class="mc-fichas">${lista.length || partes.length
+              ? fichas(lista) + partes.map((x) => fichaParte(x, ![...x.d.partes.values()].some((y) => y.pagado))).join("")
+              : `<p class="mc-vacia">Suelta aquí los productos</p>`}</div>
+            <div class="mc-total"><span class="suave">Total${esUltima(c) && (p.envio || falta() !== sumaPlatos(c) + partes.reduce((s, x) => s + x.valor, 0)) ? " (lo que falta)" : ""}</span><strong>${pesos(total)}</strong></div>
             <select data-metodo="${k}" aria-label="Método de pago">${opciones(METODOS, c.metodo)}</select>
             <input data-recibido="${k}" type="number" min="0" step="100" placeholder="Recibido en efectivo (opcional)" value="${esc(c.recibido)}">
             ${recibido && total ? `<small class="${recibido < total ? "error" : "suave"}">${recibido < total ? `Faltan ${pesos(total - recibido)}` : `Cambio: ${pesos(recibido - total)}`}</small>` : ""}
-            <button type="button" class="principal" data-cobrar="${k}"${lista.length && !cobrando ? "" : " disabled"}>Cobrar ${pesos(total)}</button>
+            <button type="button" class="principal" data-cobrar="${k}"${tieneAlgo(c) && total > 0 && !cobrando ? "" : " disabled"}>Cobrar ${pesos(total)}</button>
           </div>`;
         }).join("")}
         <button type="button" class="mc-nueva" id="mc-mas"><span>+</span>Nueva cuenta</button>
@@ -689,8 +716,28 @@ function multicuenta(ctx, pedidoInicial, titulo) {
       const c = cuentas[desde];
       if (!c?.platos.get(itemId)) return;
       c.platos.set(itemId, c.platos.get(itemId) - 1);
-    } else if (item.cantidad - enCuentas(itemId) <= 0) return;
+    } else if (sinAsignarDe(item) <= 0) return;
     if (hacia >= 0) cuentas[hacia].platos.set(itemId, (cuentas[hacia].platos.get(itemId) ?? 0) + 1);
+    elegida = null;
+    pintar();
+  }
+
+  // Divide una unidad del producto elegido en partes iguales (redondeadas a $100) entre todas
+  // las cuentas; la última parte se queda con el resto.
+  function dividir() {
+    const item = pendientes().find((i) => i.id === elegida?.item);
+    if (!item) return;
+    if (elegida.desde >= 0) {
+      const c = cuentas[elegida.desde];
+      if (!c?.platos.get(item.id)) return;
+      c.platos.set(item.id, c.platos.get(item.id) - 1);
+    } else if (sinAsignarDe(item) <= 0) return;
+    const n = cuentas.length;
+    const base = Math.floor(item.precio / n / 100) * 100;
+    divididos.push({
+      id: siguienteDivision++, item: item.id, nombre: item.nombre,
+      partes: new Map(cuentas.map((c, k) => [c.numero, { valor: k === n - 1 ? item.precio - base * (n - 1) : base, pagado: false }])),
+    });
     elegida = null;
     pintar();
   }
@@ -701,6 +748,17 @@ function multicuenta(ctx, pedidoInicial, titulo) {
       cuentas.push(nuevaCuenta());
       pintar();
     });
+    $c.querySelector("#mc-dividir")?.addEventListener("click", dividir);
+    $c.querySelector("#mc-soltar")?.addEventListener("click", () => {
+      elegida = null;
+      pintar();
+    });
+    $c.querySelectorAll("[data-deshacer]").forEach(($b) =>
+      $b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        divididos = divididos.filter((d) => d.id !== Number($b.dataset.deshacer)); // la unidad vuelve a "Sin asignar"
+        pintar();
+      }));
     $c.querySelector("#mc-imprimir").addEventListener("change", (e) => (imprimirTickets = e.target.checked));
     $c.querySelectorAll("[data-quitar-cuenta]").forEach(($b) =>
       $b.addEventListener("click", () => {
@@ -725,7 +783,7 @@ function multicuenta(ctx, pedidoInicial, titulo) {
       }));
 
     // Arrastrar con el dedo o el mouse (eventos de puntero: sirven igual en celular y computador).
-    $c.querySelectorAll(".mc-ficha").forEach(($f) => {
+    $c.querySelectorAll(".mc-ficha[data-item]").forEach(($f) => {
       $f.addEventListener("pointerdown", (inicio) => {
         if (inicio.button !== 0) return;
         const item = $f.dataset.item;
@@ -762,7 +820,7 @@ function multicuenta(ctx, pedidoInicial, titulo) {
             const $z = e.type === "pointerup" ? zonaEn(e.clientX, e.clientY) : null;
             if ($z) mover(item, desde, Number($z.dataset.zona));
           } else if (e.type === "pointerup") {
-            // Fue un toque: se elige (o se suelta) el producto para moverlo tocando una cuenta.
+            // Fue un toque: se elige (o se suelta) el producto para moverlo o dividirlo.
             elegida = elegida && elegida.item === item && elegida.desde === desde ? null : { item, desde };
             pintar();
           }
@@ -774,22 +832,62 @@ function multicuenta(ctx, pedidoInicial, titulo) {
     });
   }
 
+  // Cobra una cuenta: sus productos enteros (quedan marcados como pagados) y sus partes de los
+  // productos divididos (como abono por valor). Si es la última, cobra todo lo que falta.
   async function cobrarCuenta(k) {
     const c = cuentas[k];
+    if (cobrando || !tieneAlgo(c)) return;
     const items = [...c.platos].filter(([, n]) => n > 0).map(([id, cantidad]) => ({ id, cantidad }));
-    if (!items.length || cobrando) return;
+    const partes = partesDe(c);
+    const ultima = esUltima(c);
+    const lineas = []; // para el ticket
+    const todos = pendientes();
+    for (const x of items) {
+      const item = todos.find((i) => i.id === x.id);
+      lineas.push({ ...item, cantidad: x.cantidad });
+    }
+    for (const x of partes) {
+      lineas.push({ cantidad: 1, nombre: `${x.d.nombre} (1/${x.d.partes.size})`, precio: x.valor, opciones: [], nota: "" });
+    }
     cobrando = true;
+    let cerrada = false;
+    let cobrado = 0;
     try {
-      const resultado = await api.cobrarParte(p.id, items, c.metodo);
+      if (items.length) {
+        const r = await api.cobrarParte(p.id, items, c.metodo);
+        cobrado += r.valor;
+        cerrada = r.cerrada;
+        p = await api.pedido(p.id);
+      }
+      const abono = cerrada ? 0 : ultima ? falta() : partes.reduce((s, x) => s + x.valor, 0);
+      if (abono > 0) {
+        const r = await api.abonar(p.id, abono, c.metodo);
+        cobrado += r.valor;
+        cerrada = r.cerrada;
+      }
+      partes.forEach((x) => (x.d.partes.get(c.numero).pagado = true));
       guardarPreferencia("cuenta", imprimirTickets);
-      aviso(`Cuenta ${c.numero}: ${pesos(resultado.valor)} con ${c.metodo}`);
+      aviso(`Cuenta ${c.numero}: ${pesos(cobrado)} con ${c.metodo}`);
+      if (p.tipo === "domicilio") ctx.imprimirPendientes();
+      if (imprimirTickets) {
+        const sumaLineas = lineas.reduce((s, i) => s + i.precio * i.cantidad, 0);
+        await imprimir(ticketCuenta({
+          ...p, pedido_items: lineas, envio: Math.max(0, cobrado - sumaLineas), estado: "pagado",
+          metodo_pago: c.metodo, cerrado: new Date().toISOString(),
+        }, ctx.negocio, { mesa: `${titulo} · Cuenta ${c.numero}`, recibido: Number(c.recibido) || 0 }));
+      }
       cuentas.splice(k, 1);
-      await despuesDeCobrar(ctx, p, titulo, resultado, c.metodo, Number(c.recibido) || 0, imprimirTickets);
-      if (resultado.cerrada) return;
+      if (cerrada) {
+        cerrarDialogo();
+        aviso("Cuenta cobrada");
+        ctx.ir(p.tipo === "mesa" ? "mesas" : "domicilios");
+        return;
+      }
       p = await api.pedido(p.id);
       if (!cuentas.length) cuentas.push(nuevaCuenta());
     } catch (error) {
       aviso(error.message);
+      p = await api.pedido(p.id).catch(() => p);
     } finally {
       cobrando = false;
     }
