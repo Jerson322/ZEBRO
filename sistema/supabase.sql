@@ -898,18 +898,21 @@ create policy "equipo lee" on public.impresiones for select to authenticated usi
 
 -- Entrega lo que falta por imprimir y lo marca como impreso en el mismo paso (si dos equipos
 -- tienen la comandera, cada ticket le sale a uno solo). Borra lo impreso hace más de 2 días.
-create or replace function public.impresiones_por_imprimir() returns setof text
+drop function if exists public.impresiones_por_imprimir();
+create or replace function public.impresiones_por_imprimir() returns jsonb
 language plpgsql security definer set search_path = public as $$
+declare
+  v_resultado jsonb;
 begin
   perform exigir_rol('admin', 'cajero', 'mesero', 'cocina', 'domiciliario');
   delete from impresiones where impreso < now() - interval '2 days';
-  return query
-    with tomadas as (
-      update impresiones set impreso = now()
-      where id in (select id from impresiones where impreso is null order by creado for update skip locked)
-      returning html, creado
-    )
-    select html from tomadas order by creado;
+  with tomadas as (
+    update impresiones set impreso = now()
+    where id in (select id from impresiones where impreso is null order by creado for update skip locked)
+    returning html, creado
+  )
+  select coalesce(jsonb_agg(html order by creado), '[]') into v_resultado from tomadas;
+  return v_resultado;
 end $$;
 
 -- Entrega las comandas que faltan por imprimir y las marca como impresas en el mismo paso.

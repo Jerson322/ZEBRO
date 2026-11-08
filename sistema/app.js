@@ -60,7 +60,7 @@ async function imprimirComandasPendientes() {
   try {
     for (const comanda of await api.comandasPorImprimir()) await imprimirAqui(ticketComanda(comanda));
     // Cuentas, tickets de pago y cierres enviados desde los celulares.
-    for (const html of await api.impresionesPorImprimir()) await imprimirAqui(html);
+    for (const html of (await api.impresionesPorImprimir()) ?? []) if (typeof html === "string") await imprimirAqui(html);
   } catch {
     // Sin conexión: se vuelve a intentar en la próxima revisión.
   } finally {
