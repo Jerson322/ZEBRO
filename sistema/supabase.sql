@@ -447,7 +447,8 @@ begin
 
   -- Consumo de insumos de toda la cuenta.
   create temporary table if not exists _consumo (item_id uuid, insumo_id uuid, cantidad numeric) on commit drop;
-  delete from _consumo;
+  -- truncate y no delete: Supabase rechaza un DELETE sin WHERE (extensión safeupdate).
+  truncate _consumo;
   insert into _consumo
     select i.id, r.insumo_id, r.cantidad * i.cantidad
     from pedido_items i join recetas r on r.plato_id = i.plato_id
