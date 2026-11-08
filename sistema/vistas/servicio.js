@@ -211,7 +211,9 @@ export async function cuenta($vista, ctx, pedidoId) {
   $vista.querySelectorAll("[data-quitar]").forEach(($b) =>
     $b.addEventListener("click", () => hecho(api.quitarItem($b.dataset.quitar)))
   );
-  document.getElementById("enviar")?.addEventListener("click", () => hecho(api.enviarCocina(p.id), "Enviado a cocina"));
+  document.getElementById("enviar")?.addEventListener("click", () =>
+    // Si la comandera está en este mismo equipo, imprime de una sin esperar el aviso en vivo.
+    hecho(api.enviarCocina(p.id).then(() => ctx.imprimirPendientes()), "Enviado a cocina"));
   document.getElementById("entregar")?.addEventListener("click", () => hecho(api.marcarItems(p.id, "listo", "entregado")));
   const ticket = () => ticketCuenta(p, ctx.negocio, { mesa: titulo });
   document.getElementById("cobrar")?.addEventListener("click", () => formularioCobro(ctx, p, titulo));

@@ -8,7 +8,7 @@ import * as inventario from "./vistas/inventario.js";
 import * as finanzas from "./vistas/finanzas.js";
 import * as equipo from "./vistas/equipo.js";
 import * as ajustes from "./vistas/ajustes.js";
-import { preferencia, imprimir, ticketComanda } from "./impresion.js";
+import { preferencia, guardarPreferencia, imprimir, ticketComanda } from "./impresion.js";
 
 const SECCIONES = [
   { id: "mesas", nombre: "Mesas", vista: servicio.mesas, roles: ["admin", "cajero", "mesero"], enVivo: true },
@@ -20,7 +20,6 @@ const SECCIONES = [
   { id: "equipo", nombre: "Empleados", vista: equipo.pintar, roles: ["admin"] },
   { id: "ajustes", nombre: "Ajustes", vista: ajustes.pintar, roles: ["admin"] },
 ];
-const IMPRIMEN_COMANDAS = ["admin", "cajero", "cocina"];
 const REVISAR_COMANDAS_CADA_MS = 15000;
 // Pantalla de una cuenta (mesa o domicilio): no aparece en el menú.
 const CUENTA = { id: "pedido", vista: servicio.cuenta, roles: ["admin", "cajero", "mesero"], enVivo: true };
@@ -51,7 +50,7 @@ let buscandoComandas = false;
 
 // Si este equipo tiene la comandera, imprime lo que se envió a cocina y aún no se ha impreso.
 async function imprimirComandasPendientes() {
-  if (!ctx.perfil || !IMPRIMEN_COMANDAS.includes(ctx.perfil.rol) || !preferencia("comandas") || buscandoComandas) return;
+  if (!ctx.perfil || !preferencia("comandas") || buscandoComandas) return;
   buscandoComandas = true;
   try {
     for (const comanda of await api.comandasPorImprimir()) await imprimir(ticketComanda(comanda));
@@ -90,9 +89,19 @@ async function pintarAhora() {
     seccionesPermitidas()
       .map((s) => `<a href="#${s.id}" class="${s.id === seccion.id || (seccion === CUENTA && s.id === "mesas") ? "activo" : ""}">${s.nombre}</a>`)
       .join("") +
-    `<div class="pie"><small>${esc(ctx.perfil.nombre)} · ${esc(ctx.perfil.rol)}</small>
+    `<div class="pie">
+      <label class="opcion comandera" title="Prende esto solo en el computador conectado a la comandera">
+        <input type="checkbox" id="usar-comandera"${preferencia("comandas") ? " checked" : ""}> 🖨️ Comandera aquí</label>
+      <small>${esc(ctx.perfil.nombre)} · ${esc(ctx.perfil.rol)}</small>
       <button class="chico" id="salir">Salir</button></div>`;
   document.getElementById("salir").addEventListener("click", salir);
+  document.getElementById("usar-comandera").addEventListener("change", (evento) => {
+    guardarPreferencia("comandas", evento.target.checked);
+    aviso(evento.target.checked
+      ? "Este equipo imprimirá las comandas apenas se envíen a cocina"
+      : "Este equipo ya no imprime comandas");
+    if (evento.target.checked) imprimirComandasPendientes();
+  });
   try {
     await seccion.vista($vista, ctx, param);
   } catch (error) {

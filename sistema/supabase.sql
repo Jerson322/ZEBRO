@@ -566,7 +566,7 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_resultado jsonb;
 begin
-  perform exigir_rol('admin', 'cajero', 'cocina');
+  perform exigir_rol('admin', 'cajero', 'mesero', 'cocina');
   with tomados as (
     update pedido_items set impreso = now()
     where estado = 'cocina' and impreso is null

@@ -41,8 +41,9 @@ export async function pintar($vista, ctx) {
           <pre>${esc(ACCESO_DIRECTO)}</pre>
           <button type="button" id="copiar-acceso">Copiar</button>
           Llámalo «ZEBRO». Abre siempre el sistema desde ahí en ese computador: así imprime directo, sin preguntar.</li>
-        <li><strong>Activa la impresión en ese equipo:</strong> en «Cocina», prende «Imprimir comandas automáticamente en este equipo».
-          Al cobrar, deja marcada «Imprimir la cuenta».</li>
+        <li><strong>Activa la comandera en ese equipo:</strong> en el menú, prende «🖨️ Comandera aquí». Desde ahí, cada vez que
+          alguien toque «Enviar a cocina» (desde cualquier celular), ese computador imprime la comanda solo, en cualquier pantalla
+          que tenga abierta. Al cobrar, deja marcada «Imprimir la cuenta».</li>
       </ol>
       <p class="suave">Si la IP de la impresora cambia sola (por ejemplo al reiniciar el router), pídele a quien maneje tu internet que le deje una IP fija.</p>
     </div>`;
