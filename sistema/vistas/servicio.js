@@ -442,15 +442,28 @@ function elegirPlato(ctx, pedidoId, platoId) {
   const opcionesDe = (g) => todas.filter((o) => o.grupo_id === g.id);
   // Lo elegido en cada unidad: { opciones: Set(id), nota }.
   const unidades = [{ opciones: new Set(), nota: "" }];
+  const abiertos = new Set(); // adiciones desplegadas, para que no se cierren al volver a pintar
   const precioUnidad = (u) => plato.precio + todas.filter((o) => u.opciones.has(o.id)).reduce((s, o) => s + o.precio, 0);
 
   const bloque = (u, k) => {
     const grupos = susGrupos.map((g) => {
       const tipo = g.maximo === 1 ? "radio" : "checkbox";
       const regla = `${g.obligatorio ? "Obligatorio" : "Opcional"}${g.maximo > 1 ? ` · hasta ${g.maximo}` : ""}`;
-      const items = opcionesDe(g).map((o) => `<label class="opcion">
+      const ops = opcionesDe(g);
+      // En los grupos opcionales de una sola opción (Borde, Extra queso…) se puede elegir «Sin …».
+      const ninguna = tipo === "radio" && !g.obligatorio
+        ? `<label class="opcion"><input type="radio" name="u${k}-g-${g.id}" value="" data-unidad="${k}" data-grupo="${g.id}"${ops.some((o) => u.opciones.has(o.id)) ? "" : " checked"}>
+            Sin ${esc(g.nombre.toLowerCase())}</label>` : "";
+      const items = ninguna + ops.map((o) => `<label class="opcion">
           <input type="${tipo}" name="u${k}-g-${g.id}" value="${o.id}" data-unidad="${k}" data-grupo="${g.id}"${u.opciones.has(o.id) ? " checked" : ""}>
           ${esc(o.nombre)}${o.precio ? ` <span class="suave">+${pesos(o.precio)}</span>` : ""}</label>`).join("");
+      // Las adiciones (opcionales, de varias) van plegadas para que cada unidad quede corta.
+      if (!g.obligatorio && g.maximo > 1) {
+        const n = ops.filter((o) => u.opciones.has(o.id)).length;
+        return `<details data-plegable="${k}-${g.id}"${abiertos.has(`${k}-${g.id}`) ? " open" : ""}>
+          <summary><strong>${esc(g.nombre)}</strong> <small class="suave">${n ? `${n} elegida${n > 1 ? "s" : ""}` : "opcional · toca para ver"}</small></summary>
+          <fieldset style="margin-top:6px">${items}</fieldset></details>`;
+      }
       return `<fieldset><legend>${esc(g.nombre)} <small class="suave">${regla}</small></legend>${items}</fieldset>`;
     }).join("");
     return `<div class="${unidades.length > 1 ? "panel" : ""}" style="margin:0;display:flex;flex-direction:column;gap:10px">
@@ -513,10 +526,14 @@ function elegirPlato(ctx, pedidoId, platoId) {
       // Elegir uno en un grupo de «elegir 1» quita el anterior de ese grupo.
       opcionesDe({ id: $i.dataset.grupo }).forEach((o) => u.opciones.delete(o.id));
     }
-    if ($i.checked) u.opciones.add($i.value);
-    else u.opciones.delete($i.value);
+    if ($i.checked && $i.value) u.opciones.add($i.value);
+    else if ($i.value) u.opciones.delete($i.value);
     pintar();
   });
+  $unidades.addEventListener("toggle", (e) => {
+    const clave = e.target.dataset?.plegable;
+    if (clave) e.target.open ? abiertos.add(clave) : abiertos.delete(clave);
+  }, true);
   $unidades.addEventListener("input", (e) => {
     if (e.target.dataset.nota !== undefined) unidades[Number(e.target.dataset.nota)].nota = e.target.value;
   });
