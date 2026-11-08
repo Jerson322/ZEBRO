@@ -166,6 +166,25 @@ with por_dia as (
 update public.pedidos p set numero_domicilio = d.n
 from por_dia d where p.id = d.id and p.numero_domicilio is distinct from d.n;
 
+-- Cada domicilio nuevo recibe su número del día al guardarse, venga de donde venga.
+create or replace function public.asignar_numero_domicilio() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.tipo = 'domicilio' then
+    -- Uno a la vez, para que dos cajas no tomen el mismo número.
+    perform pg_advisory_xact_lock(hashtext('numero_domicilio'));
+    select coalesce(max(numero_domicilio), 0) + 1 into new.numero_domicilio
+    from pedidos
+    where tipo = 'domicilio'
+      and (creado at time zone 'America/Bogota')::date = (new.creado at time zone 'America/Bogota')::date;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists numero_domicilio on public.pedidos;
+create trigger numero_domicilio before insert on public.pedidos
+  for each row execute function public.asignar_numero_domicilio();
+
 create unique index if not exists una_cuenta_abierta_por_mesa
   on public.pedidos (mesa_id) where estado = 'abierto' and mesa_id is not null;
 create index if not exists pedidos_por_cierre on public.pedidos (cerrado);
@@ -310,20 +329,14 @@ create or replace function public.crear_domicilio(
 language plpgsql security definer set search_path = public as $$
 declare
   v_id uuid;
-  v_numero bigint;
 begin
   perform exigir_rol('admin', 'cajero');
   if coalesce(trim(p_cliente), '') = '' or coalesce(trim(p_direccion), '') = '' then
     raise exception 'Escribe el cliente y la dirección';
   end if;
-  -- Un domicilio a la vez saca su número, para que dos cajas no tomen el mismo.
-  perform pg_advisory_xact_lock(hashtext('numero_domicilio'));
-  select coalesce(max(numero_domicilio), 0) + 1 into v_numero
-  from pedidos
-  where tipo = 'domicilio'
-    and (creado at time zone 'America/Bogota')::date = (now() at time zone 'America/Bogota')::date;
-  insert into pedidos (tipo, numero_domicilio, entrega, cliente, telefono, direccion, envio, domiciliario_id, notas)
-  values ('domicilio', v_numero, 'preparando', trim(p_cliente), coalesce(trim(p_telefono), ''), trim(p_direccion),
+  -- El número del día lo pone la regla "numero_domicilio" de la tabla.
+  insert into pedidos (tipo, entrega, cliente, telefono, direccion, envio, domiciliario_id, notas)
+  values ('domicilio', 'preparando', trim(p_cliente), coalesce(trim(p_telefono), ''), trim(p_direccion),
           greatest(coalesce(p_envio, 0), 0), p_domiciliario, coalesce(trim(p_notas), ''))
   returning id into v_id;
   return v_id;
@@ -626,7 +639,8 @@ begin
     'abrir_mesa(uuid)', 'crear_domicilio(text, text, text, integer, uuid, text)', 'actualizar_domicilio(uuid, text, uuid)',
     'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid)', 'enviar_cocina(uuid)',
     'marcar_items(uuid, text, text)', 'cobrar(uuid, text, integer)', 'anular(uuid, text)',
-    'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()'] loop
+    'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()',
+    'asignar_numero_domicilio()'] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);
   end loop;
