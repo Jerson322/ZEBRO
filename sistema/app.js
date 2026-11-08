@@ -9,17 +9,19 @@ import * as finanzas from "./vistas/finanzas.js";
 import * as equipo from "./vistas/equipo.js";
 import * as ajustes from "./vistas/ajustes.js";
 import { preferencia, guardarPreferencia, imprimir, ticketComanda } from "./impresion.js";
+import { iconos } from "./iconos.js";
 
 const SECCIONES = [
   { id: "mesas", nombre: "Mesas", vista: servicio.mesas, roles: ["admin", "cajero", "mesero"], enVivo: true },
   { id: "domicilios", nombre: "Domicilios", vista: servicio.domicilios, roles: ["admin", "cajero"], enVivo: true },
   { id: "cocina", nombre: "Cocina", vista: cocina.pintar, roles: ["admin", "cajero", "mesero", "cocina"], enVivo: true },
-  { id: "menu", nombre: "Menú y recetas", vista: menu.pintar, roles: ["admin"] },
+  { id: "menu", nombre: "Menú y recetas", corto: "Menú", vista: menu.pintar, roles: ["admin"] },
   { id: "inventario", nombre: "Inventario", vista: inventario.pintar, roles: ["admin"] },
-  { id: "finanzas", nombre: "Ventas y gastos", vista: finanzas.pintar, roles: ["admin", "cajero"] },
-  { id: "equipo", nombre: "Empleados", vista: equipo.pintar, roles: ["admin"] },
+  { id: "finanzas", nombre: "Ventas y gastos", corto: "Ventas", vista: finanzas.pintar, roles: ["admin", "cajero"] },
+  { id: "equipo", nombre: "Empleados", corto: "Equipo", vista: equipo.pintar, roles: ["admin"] },
   { id: "ajustes", nombre: "Ajustes", vista: ajustes.pintar, roles: ["admin"] },
 ];
+const ROLES = { admin: "Administrador", cajero: "Cajero", mesero: "Mesero", cocina: "Cocina" };
 const REVISAR_COMANDAS_CADA_MS = 15000;
 // Pantalla de una cuenta (mesa o domicilio): no aparece en el menú.
 const CUENTA = { id: "pedido", vista: servicio.cuenta, roles: ["admin", "cajero", "mesero"], enVivo: true };
@@ -85,15 +87,18 @@ async function pintarAhora() {
   const { seccion, param } = rutaActual();
   $menu.hidden = false;
   $menu.innerHTML =
-    `<div class="marca">ZEBRO</div>` +
-    seccionesPermitidas()
-      .map((s) => `<a href="#${s.id}" class="${s.id === seccion.id || (seccion === CUENTA && s.id === "mesas") ? "activo" : ""}">${s.nombre}</a>`)
-      .join("") +
+    `<div class="marca"><span class="logo">Z</span><span>ZEBRO</span></div>` +
+    `<div class="secciones">${seccionesPermitidas()
+      .map((s) => `<a href="#${s.id}" class="${s.id === seccion.id || (seccion === CUENTA && s.id === "mesas") ? "activo" : ""}">${iconos[s.id]}<span data-corto="${s.corto ?? s.nombre}">${s.nombre}</span></a>`)
+      .join("")}</div>` +
     `<div class="pie">
-      <label class="opcion comandera" title="Prende esto solo en el computador conectado a la comandera">
-        <input type="checkbox" id="usar-comandera"${preferencia("comandas") ? " checked" : ""}> 🖨️ Comandera aquí</label>
-      <small>${esc(ctx.perfil.nombre)} · ${esc(ctx.perfil.rol)}</small>
-      <button class="chico" id="salir">Salir</button></div>`;
+      <label class="comandera" title="Prende esto solo en el computador conectado a la comandera">
+        <input type="checkbox" id="usar-comandera"${preferencia("comandas") ? " checked" : ""}>
+        ${iconos.impresora}<span>Comandera aquí</span></label>
+      <div class="usuario"><span class="avatar">${esc(ctx.perfil.nombre.trim().charAt(0).toUpperCase())}</span>
+        <span class="quien"><strong>${esc(ctx.perfil.nombre)}</strong><small>${ROLES[ctx.perfil.rol]}</small></span>
+        <button class="icono-boton" id="salir" title="Salir" aria-label="Salir">${iconos.salir}</button></div>
+    </div>`;
   document.getElementById("salir").addEventListener("click", salir);
   document.getElementById("usar-comandera").addEventListener("change", (evento) => {
     guardarPreferencia("comandas", evento.target.checked);
@@ -104,11 +109,22 @@ async function pintarAhora() {
   });
   try {
     await seccion.vista($vista, ctx, param);
+    etiquetarTablas($vista);
   } catch (error) {
     $vista.innerHTML = `<div class="panel"><p class="error">${esc(error.message)}</p>
       <button class="principal" id="reintentar">Reintentar</button></div>`;
     document.getElementById("reintentar").addEventListener("click", pintar);
   }
+}
+
+// En el celular cada fila de una tabla se muestra como tarjeta: cada celda lleva el nombre de su columna.
+function etiquetarTablas(raiz) {
+  raiz.querySelectorAll("table").forEach(($tabla) => {
+    const columnas = [...$tabla.querySelectorAll("thead th")].map(($th) => $th.textContent.trim());
+    $tabla.querySelectorAll("tbody tr").forEach(($fila) =>
+      [...$fila.children].forEach(($celda, i) => ($celda.dataset.columna = columnas[i] ?? ""))
+    );
+  });
 }
 
 // Llega un cambio de otro dispositivo: se vuelve a pintar la pantalla si muestra pedidos.
@@ -133,7 +149,9 @@ document.getElementById("dialogo").addEventListener("close", () => {
 
 function pantalla(html) {
   $menu.hidden = true;
-  $vista.innerHTML = `<div class="panel acceso"><h1>ZEBRO</h1>${html}</div>`;
+  $vista.innerHTML = `<div class="acceso">
+    <div class="acceso-marca"><span class="logo">Z</span><h1>ZEBRO</h1><p class="suave">Sistema del restaurante</p></div>
+    <div class="panel">${html}</div></div>`;
 }
 
 function pantallaError(mensaje) {

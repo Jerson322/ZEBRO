@@ -61,7 +61,7 @@ function formularioInsumo(i, ctx) {
       <label>Avisar cuando queden<input name="minimo" type="number" min="0" step="any" value="${i.minimo ?? 0}"></label>
     </div>
     ${nuevo ? `<label>Existencias iniciales<input name="stock" type="number" min="0" step="any" value="0"></label>` : ""}
-    <p class="suave" style="margin:0">Consejo: si compras 1 kg de carne a $20.000 y la unidad es gramos, el costo por unidad es 20.</p>`,
+    `,
     async (c) => {
       if (!c.nombre.trim()) throw new Error("Escribe el nombre del insumo");
       const costo = Number(c.costo || 0);

@@ -11,6 +11,10 @@ const ESTADO_ITEM = { nuevo: "Sin enviar", cocina: "En cocina", listo: "¡Listo!
 const subtotal = (p) => p.pedido_items.reduce((s, i) => s + i.precio * i.cantidad, 0);
 const totalCuenta = (p) => subtotal(p) + (p.envio || 0);
 const totalMostrado = (p) => (p.estado === "abierto" ? totalCuenta(p) : p.total);
+const platosEnCuenta = (items) => {
+  const n = items.reduce((s, i) => s + i.cantidad, 0);
+  return `${n} ${n === 1 ? "plato" : "platos"}`;
+};
 const puedeCobrar = (rol) => rol === "admin" || rol === "cajero";
 
 // Mesas
@@ -21,13 +25,13 @@ export async function mesas($vista, ctx) {
   const tarjetas = lista.map((m) => {
     const p = porMesa.get(m.id);
     if (!p) {
-      return `<button class="mesa libre" data-mesa="${m.id}"><strong>${esc(m.nombre)}</strong><span>Libre</span></button>`;
+      return `<button class="mesa libre" data-mesa="${m.id}"><strong>${esc(m.nombre)}</strong><span class="estado-mesa">Libre</span></button>`;
     }
     const listos = p.pedido_items.some((i) => i.estado === "listo");
     const sinEnviar = p.pedido_items.some((i) => i.estado === "nuevo");
     return `<button class="mesa ocupada ${listos ? "listo" : ""}" data-mesa="${m.id}">
       <strong>${esc(m.nombre)}</strong>
-      <span>${pesos(totalCuenta(p))}</span>
+      <span class="total-mesa">${pesos(totalCuenta(p))}</span>
       <small>${minutosDesde(p.creado)} min${listos ? " · ¡Platos listos!" : sinEnviar ? " · Sin enviar" : ""}</small>
     </button>`;
   });
@@ -183,6 +187,7 @@ export async function cuenta($vista, ctx, pedidoId) {
           ${p.envio ? `<div class="item"><span>Envío</span><span class="num">${pesos(p.envio)}</span></div>` : ""}
           <div class="total"><span>Total</span><span>${pesos(totalMostrado(p))}</span></div>
         </div>
+        ${abierta && items.length ? `<button class="ver-cuenta" id="ver-cuenta">${platosEnCuenta(items)} · Ver cuenta <strong>${pesos(totalMostrado(p))}</strong></button>` : ""}
         ${abierta ? `<div class="acciones-cuenta">
           ${hay("nuevo") ? `<button class="principal" id="enviar">Enviar a cocina</button>` : ""}
           ${hay("listo") && rol !== "cocina" ? `<button id="entregar">Marcar entregados</button>` : ""}
@@ -219,6 +224,9 @@ export async function cuenta($vista, ctx, pedidoId) {
   document.getElementById("cobrar")?.addEventListener("click", () => formularioCobro(ctx, p, titulo));
   document.getElementById("precuenta")?.addEventListener("click", () => imprimir(ticket()));
   document.getElementById("imprimir")?.addEventListener("click", () => imprimir(ticket()));
+  // En el celular la cuenta queda debajo de la carta: este botón lleva hasta ella.
+  document.getElementById("ver-cuenta")?.addEventListener("click", () =>
+    $vista.querySelector(".resumen").scrollIntoView({ behavior: "smooth", block: "start" }));
   document.getElementById("anular")?.addEventListener("click", () => {
     const motivo = prompt("¿Por qué se anula? (Si ya estaba pagada, el inventario se devuelve)");
     if (motivo === null) return;
