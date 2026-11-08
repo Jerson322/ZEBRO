@@ -88,6 +88,15 @@ function pintar() {
 async function pintarAhora() {
   if (!ctx.perfil) return; // quedó pendiente de antes de cerrar sesión
   const { seccion, param } = rutaActual();
+  if (!seccion) {
+    // Rol que esta versión de la página no conoce (por ejemplo, se publicó una versión nueva).
+    pantalla(`<p>Tu usuario no tiene pantallas en esta versión del sistema.</p>
+      <p class="suave">Recarga la página para traer la versión más reciente.</p>
+      <button class="principal" id="recargar">Recargar</button><button id="salir-rol">Salir</button>`);
+    document.getElementById("recargar").addEventListener("click", () => location.reload());
+    document.getElementById("salir-rol").addEventListener("click", salir);
+    return;
+  }
   $menu.hidden = false;
   $menu.innerHTML =
     `<div class="marca"><span class="logo">Z</span><span>ZEBRO</span></div>` +
@@ -239,9 +248,9 @@ async function salir() {
   clearTimeout(temporizadorEnVivo);
   await api.cerrarSesion();
   ctx.perfil = null;
-  // El siguiente usuario empieza en su pantalla principal, no en la del anterior.
-  history.replaceState(null, "", location.pathname);
-  pantallaLogin();
+  // El siguiente usuario empieza en su pantalla principal, no en la del anterior, y con la
+  // versión más reciente del sistema: se recarga la página.
+  location.replace(location.pathname);
 }
 
 async function iniciar() {
