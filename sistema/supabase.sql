@@ -331,12 +331,13 @@ declare
   v_id uuid;
 begin
   perform exigir_rol('admin', 'cajero');
-  if coalesce(trim(p_cliente), '') = '' or coalesce(trim(p_direccion), '') = '' then
-    raise exception 'Escribe el cliente y la dirección';
+  -- Solo el nombre es obligatorio; teléfono, dirección y lo demás se pueden dejar en blanco.
+  if coalesce(trim(p_cliente), '') = '' then
+    raise exception 'Escribe el nombre del cliente';
   end if;
   -- El número del día lo pone la regla "numero_domicilio" de la tabla.
   insert into pedidos (tipo, entrega, cliente, telefono, direccion, envio, domiciliario_id, notas)
-  values ('domicilio', 'preparando', trim(p_cliente), coalesce(trim(p_telefono), ''), trim(p_direccion),
+  values ('domicilio', 'preparando', trim(p_cliente), coalesce(trim(p_telefono), ''), coalesce(trim(p_direccion), ''),
           greatest(coalesce(p_envio, 0), 0), p_domiciliario, coalesce(trim(p_notas), ''))
   returning id into v_id;
   return v_id;

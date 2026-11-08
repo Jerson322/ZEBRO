@@ -105,7 +105,7 @@ export async function domicilios($vista, ctx) {
   const nombreDe = (id) => equipo.find((e) => e.id === id)?.nombre ?? "Sin asignar";
   const textoEntrega = Object.fromEntries(ENTREGAS);
   const filas = abiertos.map((p) => `<button class="domicilio" data-pedido="${p.id}">
-      <span><strong>#${p.numero_domicilio ?? p.numero} ${esc(p.cliente)}</strong><br><small class="suave">${esc(p.direccion)}</small></span>
+      <span><strong>#${p.numero_domicilio ?? p.numero} ${esc(p.cliente)}</strong>${p.direccion ? `<br><small class="suave">${esc(p.direccion)}</small>` : ""}</span>
       <span class="num"><strong>${pesos(totalCuenta(p))}</strong><br>
         <small class="etiqueta">${textoEntrega[p.entrega] ?? ""}</small> <small class="suave">${esc(nombreDe(p.domiciliario_id))}</small></span>
     </button>`);
@@ -120,9 +120,9 @@ export async function domicilios($vista, ctx) {
     formulario("Nuevo domicilio", `
       <div class="fila">
         <label>Cliente<input name="cliente" autocomplete="off"></label>
-        <label>Teléfono<input name="telefono" type="tel"></label>
+        <label>Teléfono (opcional)<input name="telefono" type="tel"></label>
       </div>
-      <label>Dirección<input name="direccion"></label>
+      <label>Dirección (opcional)<input name="direccion"></label>
       <div class="fila">
         <label>Valor del envío<input name="envio" type="number" min="0" step="100" value="0"></label>
         <label>Domiciliario<select name="domiciliario"><option value="">Sin asignar</option>${opciones(equipo.map((e) => [e.id, e.nombre]))}</select></label>
@@ -161,7 +161,7 @@ export async function cuenta($vista, ctx, pedidoId) {
   }).join("");
 
   const domicilio = p.tipo === "domicilio" ? `<div class="panel">
-      <p style="margin:0 0 8px"><strong>${esc(p.cliente)}</strong> · ${esc(p.telefono)}<br>${esc(p.direccion)}
+      <p style="margin:0 0 8px"><strong>${esc(p.cliente)}</strong>${p.telefono ? ` · ${esc(p.telefono)}` : ""}${p.direccion ? `<br>${esc(p.direccion)}` : ""}
         ${p.notas ? `<br><small class="suave">${esc(p.notas)}</small>` : ""}</p>
       ${abierta && puedeCobrar(rol) ? `<div class="fila">
         <label>Estado<select id="entrega">${opciones(ENTREGAS, p.entrega)}</select></label>

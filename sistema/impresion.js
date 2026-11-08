@@ -76,7 +76,8 @@ export function ticketCuenta(p, negocio, { mesa, recibido } = {}) {
     <hr>
     <div>${pagada ? "Cuenta" : "PRE-CUENTA"} #${p.numero} · ${fechaHora(p.cerrado ?? new Date())}</div>
     <div>${p.tipo === "mesa" ? esc(mesa ?? "Mesa") : `Domicilio #${p.numero_domicilio ?? p.numero}: ${esc(p.cliente)}`}</div>
-    ${p.tipo === "domicilio" ? `<div>${esc(p.direccion)}</div><div>Tel. ${esc(p.telefono)}</div>` : ""}
+    ${p.tipo === "domicilio" && p.direccion ? `<div>${esc(p.direccion)}</div>` : ""}
+    ${p.tipo === "domicilio" && p.telefono ? `<div>Tel. ${esc(p.telefono)}</div>` : ""}
     <hr>
     ${p.pedido_items.map((i) => fila(`${i.cantidad} × ${esc(i.nombre)}`, pesos(i.precio * i.cantidad)) + detalleItem(i)).join("")}
     <hr>
