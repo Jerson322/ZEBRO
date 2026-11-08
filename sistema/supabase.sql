@@ -612,14 +612,18 @@ begin
 end $$;
 
 -- Actualizaciones en vivo para mesas, cocina y domicilios.
+-- Si una tabla ya estaba activada (por ejemplo, desde el panel de Supabase), se deja como está.
 do $$
+declare
+  t text;
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'pedidos') then
-      alter publication supabase_realtime add table public.pedidos;
-    end if;
-    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'pedido_items') then
-      alter publication supabase_realtime add table public.pedido_items;
-    end if;
+    foreach t in array array['pedidos', 'pedido_items'] loop
+      begin
+        execute format('alter publication supabase_realtime add table public.%I', t);
+      exception when duplicate_object then
+        null;
+      end;
+    end loop;
   end if;
 end $$;
