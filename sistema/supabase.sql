@@ -300,13 +300,13 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- El domiciliario no ve ventas: solo las mesas abiertas (para tomar pedidos) y sus domicilios
--- ya facturados, más los que nadie tiene asignados.
+-- ya enviados a cocina (cobrados o no), más los que nadie tiene asignados.
 drop policy if exists "equipo lee" on public.pedidos;
 create policy "equipo lee" on public.pedidos for select to authenticated using (
   case rol_actual()
     when 'domiciliario' then
       (tipo = 'mesa' and estado = 'abierto')
-      or (tipo = 'domicilio' and estado = 'pagado' and entrega is not null
+      or (tipo = 'domicilio' and estado <> 'anulado' and entrega is not null
           and (domiciliario_id is null or domiciliario_id = mi_empleado()))
     else rol_actual() is not null
   end
@@ -400,7 +400,7 @@ begin
     raise exception 'El envío solo puede ser 0, 1.000 o 2.000';
   end if;
   -- El número del día lo pone la regla "numero_domicilio" de la tabla.
-  -- Queda sin estado de entrega: pasa a "preparando" cuando se factura.
+  -- Queda sin estado de entrega: pasa a "preparando" cuando se envía a cocina.
   insert into pedidos (tipo, cliente, telefono, direccion, envio, domiciliario_id, notas)
   values ('domicilio', trim(p_cliente), coalesce(trim(p_telefono), ''), coalesce(trim(p_direccion), ''),
           coalesce(p_envio, 0), p_domiciliario, coalesce(trim(p_notas), ''))
@@ -423,7 +423,7 @@ end $$;
 
 drop function if exists public.marcar_entregado(uuid);
 
--- Revisa que quien llama pueda tocar este domicilio (ya facturado y no anulado).
+-- Revisa que quien llama pueda tocar este domicilio (ya enviado a cocina y no anulado).
 -- Un domiciliario solo toca los suyos; si no tenía a nadie asignado, queda a su nombre.
 -- Uso interno: solo la llaman las funciones de abajo.
 create or replace function public.domicilio_para_mi(p_pedido uuid) returns void
@@ -434,8 +434,8 @@ declare
 begin
   perform exigir_rol('admin', 'cajero', 'domiciliario');
   select * into v_pedido from pedidos where id = p_pedido and tipo = 'domicilio' for update;
-  if not found or v_pedido.estado <> 'pagado' or v_pedido.entrega is null then
-    raise exception 'Ese domicilio no existe, no se ha facturado o está anulado';
+  if not found or v_pedido.estado = 'anulado' or v_pedido.entrega is null then
+    raise exception 'Ese domicilio no existe, no se ha enviado a cocina o está anulado';
   end if;
   if rol_actual() = 'domiciliario' then
     v_yo := mi_empleado();
@@ -590,6 +590,10 @@ begin
   from pedidos p
   where i.pedido_id = p.id and p.id = p_pedido and p.estado = 'abierto' and i.estado = 'nuevo';
   get diagnostics v_total = row_count;
+  -- Un domicilio enviado a cocina queda "en preparación" (se cobra después, al entregarlo).
+  if v_total > 0 then
+    update pedidos set entrega = coalesce(entrega, 'preparando') where id = p_pedido and tipo = 'domicilio';
+  end if;
   return v_total;
 end $$;
 
@@ -677,8 +681,8 @@ begin
     costo = (select coalesce(sum(costo * cantidad), 0) from pedido_items where pedido_id = p_pedido),
     metodo_pago = p_metodo,
     cerrado = now(),
-    -- Un domicilio facturado pasa a preparación y lo que falte se manda a cocina.
-    entrega = case when tipo = 'domicilio' then 'preparando' else entrega end
+    -- Si un domicilio se cobra antes de enviarlo a cocina, pasa a preparación y se manda a cocina.
+    entrega = case when tipo = 'domicilio' then coalesce(entrega, 'preparando') else entrega end
   where id = p_pedido;
   if v_pedido.tipo = 'domicilio' then
     update pedido_items set estado = 'cocina' where pedido_id = p_pedido and estado = 'nuevo';

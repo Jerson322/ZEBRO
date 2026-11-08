@@ -83,7 +83,7 @@ export const movimientos = (limite = 30) =>
 export const pedidosAbiertos = () =>
   resultado(sb.from("pedidos").select("*, pedido_items(*)").eq("estado", "abierto").order("creado"));
 
-// Domicilios sin terminar: los que se están tomando y los facturados que faltan por entregar.
+// Domicilios sin terminar: los que no se han cobrado y los cobrados que faltan por entregar.
 export const domiciliosPendientes = () =>
   resultado(sb.from("pedidos").select("*, pedido_items(*)").eq("tipo", "domicilio")
     .or("estado.eq.abierto,and(estado.eq.pagado,entrega.in.(preparando,en_camino))").order("creado"));

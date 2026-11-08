@@ -9,9 +9,9 @@ const ENVIOS = [[0, "Sin envío"], [1000, "$ 1.000"], [2000, "$ 2.000"]];
 // Sin estado = se está tomando el pedido; al facturarlo pasa a preparación.
 const ENTREGA = { preparando: "En preparación", en_camino: "En camino", entregado: "Entregado" };
 const textoEntrega = (p) => (p.entrega ? ENTREGA[p.entrega] : "Tomando pedido");
-// Quién cambia el estado, las novedades y lo recibido de un domicilio ya facturado.
+// Quién cambia el estado, las novedades y lo recibido de un domicilio ya enviado a cocina.
 const puedeEntregar = (rol, p) =>
-  p.estado === "pagado" && Boolean(p.entrega) && ["admin", "cajero", "domiciliario"].includes(rol);
+  p.estado !== "anulado" && Boolean(p.entrega) && ["admin", "cajero", "domiciliario"].includes(rol);
 // Botones de estado: se puede pasar a cualquiera, incluso de "preparando" directo a "entregado".
 const botonesEntrega = (p) => Object.entries(ENTREGA).map(([valor, texto]) => p.entrega === valor
   ? `<button class="chico principal" disabled>${texto}</button>`
@@ -134,8 +134,10 @@ export async function domicilios($vista, ctx) {
     api.domiciliosPendientes(), api.equipo(), yo ? api.historialEntregas(yo) : [],
   ]);
   const nombreDe = (id) => equipo.find((e) => e.id === id)?.nombre;
-  const porEntregar = pendientes.filter((p) => p.estado === "pagado");
-  const tomando = pendientes.filter((p) => p.estado === "abierto");
+  // En marcha: ya se enviaron a cocina. Se cobran cuando el cliente paga, antes o después de entregar.
+  const porEntregar = pendientes.filter((p) => p.entrega === "preparando" || p.entrega === "en_camino");
+  const porCobrar = pendientes.filter((p) => p.estado === "abierto" && p.entrega === "entregado");
+  const tomando = pendientes.filter((p) => p.estado === "abierto" && !p.entrega);
 
   const tarjeta = (p) => `<div class="domicilio">
       <span><strong>#${p.numero_domicilio ?? p.numero} ${esc(p.cliente)}</strong>
@@ -145,6 +147,7 @@ export async function domicilios($vista, ctx) {
         ${p.novedades ? `<br><small class="error">Tiene novedades</small>` : ""}</span>
       <span class="num"><strong>${pesos(totalMostrado(p))}</strong><br>
         <small class="etiqueta">${textoEntrega(p)}</small>
+        ${p.estado === "abierto" && p.entrega ? `<small class="etiqueta">Sin cobrar</small>` : ""}
         ${!domiciliario && nombreDe(p.domiciliario_id) ? `<small class="suave">${esc(nombreDe(p.domiciliario_id))}</small>` : ""}
         ${p.entrega === "entregado" ? `<br><small class="suave">${hora(p.entregado_en)}${p.recibido != null ? ` · recibió ${pesos(p.recibido)}` : ""}</small>` : ""}
         <span class="botones-domicilio">
@@ -157,7 +160,7 @@ export async function domicilios($vista, ctx) {
   const lista = (pedidos, vacio) => pedidos.length
     ? `<div class="lista-domicilios">${pedidos.map(tarjeta).join("")}</div>`
     : `<p class="vacio">${vacio}</p>`;
-  const suma = (pedidos) => pedidos.reduce((s, p) => s + (p.total ?? 0), 0);
+  const suma = (pedidos) => pedidos.reduce((s, p) => s + (totalMostrado(p) ?? 0), 0);
 
   if (domiciliario) {
     const mios = porEntregar.filter((p) => p.domiciliario_id === yo);
@@ -185,10 +188,13 @@ export async function domicilios($vista, ctx) {
 
   $vista.innerHTML = `
     <div class="encabezado"><h1>Domicilios</h1><button class="principal" id="nuevo-domicilio">Nuevo domicilio</button></div>
+    <h2>Tomando pedido (${tomando.length})</h2>
+    <p class="suave" style="margin-top:-6px">Agrega los platos y dale «Enviar a cocina» para que salga la comanda.</p>
+    ${lista(tomando, "No hay domicilios tomándose.")}
     <h2>Por entregar (${porEntregar.length})</h2>
     ${lista(porEntregar, "No hay domicilios por entregar.")}
-    <h2>Tomando pedido (${tomando.length})</h2>
-    ${lista(tomando, "No hay domicilios sin facturar.")}`;
+    <h2>Entregados sin cobrar (${porCobrar.length})</h2>
+    ${lista(porCobrar, "No hay domicilios pendientes por cobrar.")}`;
   activarBotonesEntrega($vista, ctx);
   document.getElementById("nuevo-domicilio")?.addEventListener("click", () => {
     let creado = null;
@@ -224,8 +230,10 @@ export async function cuenta($vista, ctx, pedidoId) {
   const items = [...p.pedido_items].sort((a, b) => a.creado.localeCompare(b.creado));
   const hay = (estado) => items.some((i) => i.estado === estado);
 
+  // El domiciliario ve los domicilios pero no les cambia platos ni los cobra.
+  const soloLectura = rol === "domiciliario" && p.tipo === "domicilio";
   const filasItems = items.map((i) => {
-    const puedeQuitar = abierta && (i.estado === "nuevo" || puedeCobrar(rol));
+    const puedeQuitar = abierta && !soloLectura && (i.estado === "nuevo" || puedeCobrar(rol));
     const detalle = [...i.opciones.map((o) => o.nombre), i.nota].filter(Boolean).join(" · ");
     return `<div class="item">
       <div><strong>${i.cantidad}× ${esc(i.nombre)}</strong>${detalle ? `<br><small class="suave">${esc(detalle)}</small>` : ""}
@@ -237,7 +245,7 @@ export async function cuenta($vista, ctx, pedidoId) {
 
   const esDomicilio = p.tipo === "domicilio";
   const entrega = esDomicilio && puedeEntregar(rol, p);
-  const cambio = p.recibido != null && p.total != null ? p.recibido - p.total : 0;
+  const cambio = p.recibido != null ? p.recibido - totalMostrado(p) : 0;
   const domicilio = esDomicilio ? `<div class="panel">
       <p style="margin:0 0 8px"><strong>${esc(p.cliente)}</strong>
         ${p.telefono ? ` · <a href="tel:${esc(p.telefono)}">${esc(p.telefono)}</a>` : ""}
@@ -272,7 +280,7 @@ export async function cuenta($vista, ctx, pedidoId) {
       ${abierta ? "" : `<span class="etiqueta">${estadoCerrada}</span>`}
     </div>
     <div class="cuenta">
-      ${abierta ? `<div class="carta">${carta(ctx.menu)}</div>` : ""}
+      ${abierta && !soloLectura ? `<div class="carta">${carta(ctx.menu)}</div>` : ""}
       <div class="resumen">
         ${domicilio}
         <div class="panel">
@@ -280,14 +288,14 @@ export async function cuenta($vista, ctx, pedidoId) {
           ${p.envio ? `<div class="item"><span>Envío</span><span class="num">${pesos(p.envio)}</span></div>` : ""}
           <div class="total"><span>Total</span><span>${pesos(totalMostrado(p))}</span></div>
         </div>
-        ${abierta && items.length ? `<button class="ver-cuenta" id="ver-cuenta">${platosEnCuenta(items)} · Ver cuenta <strong>${pesos(totalMostrado(p))}</strong></button>` : ""}
-        ${abierta ? `<div class="acciones-cuenta">
-          ${hay("nuevo") && !esDomicilio ? `<button class="principal" id="enviar">Enviar a cocina</button>` : ""}
+        ${abierta && !soloLectura && items.length ? `<button class="ver-cuenta" id="ver-cuenta">${platosEnCuenta(items)} · Ver cuenta <strong>${pesos(totalMostrado(p))}</strong></button>` : ""}
+        ${abierta && !soloLectura ? `<div class="acciones-cuenta">
+          ${hay("nuevo") ? `<button class="principal" id="enviar">Enviar a cocina</button>` : ""}
           ${(hay("cocina") || hay("listo")) && !esDomicilio ? `<button id="entregar">Marcar entregado</button>` : ""}
           ${items.length ? `<button id="precuenta">Imprimir cuenta</button>` : ""}
-          ${puedeCobrar(rol) && items.length ? `<button class="principal" id="cobrar">${esDomicilio ? "Facturar" : "Cobrar"}</button>` : ""}
+          ${puedeCobrar(rol) && items.length && !hay("nuevo") ? `<button class="principal" id="cobrar">Cobrar</button>` : ""}
           ${rol === "admin" ? `<button class="peligro" id="anular">Anular cuenta</button>` : ""}
-        </div>` : `<div class="acciones-cuenta">
+        </div>` : abierta ? "" : `<div class="acciones-cuenta">
           ${rol !== "domiciliario" ? `<button id="imprimir">Imprimir</button>` : ""}
           ${rol === "admin" && p.estado === "pagado" ? `<button class="peligro" id="anular">Anular venta</button>` : ""}
         </div>`}
@@ -379,30 +387,28 @@ function elegirPlato(ctx, pedidoId, platoId) {
     { boton: "Agregar", alTerminar: () => ctx.refrescar() });
 }
 
-// Al facturar un domicilio pasa a preparación, va a cocina y la cuenta se imprime siempre.
+// Se cobra al final (después de comer o al entregar el domicilio). Lo que la comanda ya llevó a
+// cocina no cambia; si quedó algo sin enviar en un domicilio, la base de datos lo manda a cocina.
 function formularioCobro(ctx, p, titulo) {
   const total = totalCuenta(p);
-  const domicilio = p.tipo === "domicilio";
   let cobro = null;
-  const $form = formulario(`${domicilio ? "Facturar" : "Cobrar"} ${pesos(total)}`, `
+  const $form = formulario(`Cobrar ${pesos(total)}`, `
     <label>Método de pago<select name="metodo">${opciones(METODOS)}</select></label>
-    <label>Recibido (efectivo)<input name="recibido" type="number" min="0" step="100"></label>
+    <label>Recibido (efectivo)<input name="recibido" type="number" min="0" step="100" value="${p.recibido ?? ""}"></label>
     <div class="total"><span>Total a recibir</span><span>${pesos(total)}</span></div>
     <p class="suave" id="cambio" style="margin:0"></p>
-    ${domicilio ? `<p class="suave" style="margin:0">Se imprime la cuenta y el pedido pasa a preparación.</p>`
-      : `<label class="opcion"><input type="checkbox" name="imprimir"${preferencia("cuenta") ? " checked" : ""}> Imprimir la cuenta</label>`}`,
+    <label class="opcion"><input type="checkbox" name="imprimir"${preferencia("cuenta") ? " checked" : ""}> Imprimir la cuenta</label>`,
     async (c) => {
       await api.cobrar(p.id, c.metodo);
       cobro = c;
     },
     {
-      boton: domicilio ? "Facturar" : "Confirmar pago",
+      boton: "Confirmar pago",
       alTerminar: async () => {
-        if (!domicilio) guardarPreferencia("cuenta", Boolean(cobro.imprimir));
-        aviso(domicilio ? "Domicilio facturado: en preparación" : "Cuenta cobrada");
-        // Si la comandera está en este equipo, la comanda del domicilio sale de una.
-        if (domicilio) ctx.imprimirPendientes();
-        if (domicilio || cobro.imprimir) {
+        guardarPreferencia("cuenta", Boolean(cobro.imprimir));
+        aviso("Cuenta cobrada");
+        if (p.tipo === "domicilio") ctx.imprimirPendientes();
+        if (cobro.imprimir) {
           // Se imprime la cuenta ya cerrada, tal como quedó guardada (total y método).
           const cerrada = await api.pedido(p.id);
           await imprimir(ticketCuenta(cerrada, ctx.negocio, { mesa: titulo, recibido: Number(cobro.recibido) || 0 }));
@@ -410,8 +416,10 @@ function formularioCobro(ctx, p, titulo) {
         ctx.ir(p.tipo === "mesa" ? "mesas" : "domicilios");
       },
     });
-  $form.addEventListener("input", () => {
+  const actualizar = () => {
     const recibido = Number($form.recibido.value) || 0;
     $form.querySelector("#cambio").textContent = recibido ? `Cambio: ${pesos(recibido - total)}` : "";
-  });
+  };
+  $form.addEventListener("input", actualizar);
+  actualizar();
 }
