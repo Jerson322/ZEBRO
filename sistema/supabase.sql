@@ -581,8 +581,15 @@ begin
   into v_opciones, v_extra
   from opciones_mod o where o.id = any (v_elegidas);
 
-  insert into pedido_items (pedido_id, plato_id, nombre, precio, cantidad, opciones, nota)
-  values (p_pedido, p_plato, v_plato.nombre, v_plato.precio + v_extra, p_cantidad, v_opciones, coalesce(trim(p_nota), ''));
+  -- Si ya está el mismo plato (mismas opciones y nota) sin enviar a cocina, se suma a esa línea:
+  -- 5 toques a «Mazorcada especial» quedan como «5× Mazorcada especial».
+  update pedido_items set cantidad = cantidad + p_cantidad
+  where pedido_id = p_pedido and plato_id = p_plato and estado = 'nuevo' and pago_id is null
+    and precio = v_plato.precio + v_extra and opciones = v_opciones and nota = coalesce(trim(p_nota), '');
+  if not found then
+    insert into pedido_items (pedido_id, plato_id, nombre, precio, cantidad, opciones, nota)
+    values (p_pedido, p_plato, v_plato.nombre, v_plato.precio + v_extra, p_cantidad, v_opciones, coalesce(trim(p_nota), ''));
+  end if;
 end $$;
 
 -- Lo que no se ha enviado a cocina lo quita cualquiera; lo ya enviado, solo caja o administrador.

@@ -257,6 +257,14 @@
       text-align: left; min-height: 96px; padding: 14px; border: 0; border-radius: 14px; box-shadow: var(--sombra);
     }
     .plato:hover { box-shadow: 0 0 0 2px var(--acento-suave), var(--sombra); }
+    /* Contador de toques seguidos al mismo plato (+1, +2…) antes de agregarlos */
+    .plato { position: relative; }
+    .plato .contador {
+      position: absolute; top: 8px; right: 8px; min-width: 30px; padding: 3px 9px; border-radius: 999px;
+      background: var(--acento); color: #fff; font-weight: 800; font-size: 14px; text-align: center;
+      animation: contar 0.18s ease-out;
+    }
+    @keyframes contar { from { transform: scale(1.4); } }
     .plato[hidden] { display: none; }
     .plato strong { font-weight: 600; line-height: 1.25; }
     .plato span { color: var(--acento-oscuro); font-weight: 700; }

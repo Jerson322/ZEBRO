@@ -216,7 +216,18 @@ export async function domicilios($vista, ctx) {
 
 // Cuenta de una mesa o un domicilio
 
+// La carta recuerda la categoría elegida y dónde estaba la pantalla mientras se trabaja en la
+// misma cuenta: al agregar un plato no se devuelve a «Todo» ni salta arriba.
+const vistaCarta = { pedido: null, categoria: "*" };
+// Toques seguidos a un mismo plato: se juntan y se agregan de una vez (5 toques = 5×).
+const toques = new Map(); // id del plato → { n, temporizador }
+const ESPERA_TOQUES_MS = 700;
+
 export async function cuenta($vista, ctx, pedidoId) {
+  // Se vuelve a pintar la misma cuenta que está en pantalla (agregar un plato, aviso en vivo…).
+  const repintando = Boolean($vista.querySelector(`[data-cuenta="${pedidoId}"]`));
+  const scroll = repintando ? window.scrollY : 0;
+  if (vistaCarta.pedido !== pedidoId) Object.assign(vistaCarta, { pedido: pedidoId, categoria: "*" });
   const [p, listaMesas, equipo] = await Promise.all([api.pedido(pedidoId), api.mesas(), api.equipo()]);
   if (!p) {
     $vista.innerHTML = `<p class="vacio">Esa cuenta no existe.</p>`;
@@ -293,8 +304,8 @@ export async function cuenta($vista, ctx, pedidoId) {
       <h1><a href="#${esc(ctx.volverA ?? (p.tipo === "mesa" ? "mesas" : "domicilios"))}" class="volver" aria-label="Volver">←</a> ${esc(titulo)}</h1>
       ${abierta ? "" : `<span class="etiqueta">${estadoCerrada}</span>`}
     </div>
-    <div class="cuenta">
-      ${abierta && !soloLectura ? `<div class="carta">${carta(ctx.menu)}</div>` : ""}
+    <div class="cuenta" data-cuenta="${p.id}">
+      ${abierta && !soloLectura ? `<div class="carta">${carta(ctx.menu, vistaCarta.categoria)}</div>` : ""}
       <div class="resumen">
         ${domicilio}
         ${paraLlevar}
@@ -322,11 +333,13 @@ export async function cuenta($vista, ctx, pedidoId) {
   const hecho = (promesa, mensaje) =>
     promesa.then(() => { if (mensaje) aviso(mensaje); ctx.refrescar(); }).catch((e) => aviso(e.message));
 
+  if (repintando) window.scrollTo(0, scroll);
   $vista.querySelectorAll("[data-plato]").forEach(($b) =>
-    $b.addEventListener("click", () => elegirPlato(ctx, p.id, $b.dataset.plato))
+    $b.addEventListener("click", () => tocarPlato(ctx, p.id, $b))
   );
   $vista.querySelectorAll("[data-categoria]").forEach(($b) =>
     $b.addEventListener("click", () => {
+      vistaCarta.categoria = $b.dataset.categoria;
       $vista.querySelectorAll("[data-categoria]").forEach(($o) => $o.classList.toggle("activo", $o === $b));
       $vista.querySelectorAll("[data-de]").forEach(($pl) => ($pl.hidden = $b.dataset.categoria !== "*" && $pl.dataset.de !== $b.dataset.categoria));
     })
@@ -366,18 +379,56 @@ export async function cuenta($vista, ctx, pedidoId) {
     hecho(api.registrarNovedad(p.id, document.getElementById("novedad").value), "Novedad registrada"));
 }
 
-function carta(menu) {
+function carta(menu, elegida = "*") {
   const disponibles = menu.platos.filter((pl) => pl.activo);
   if (!disponibles.length) return `<p class="vacio">El menú está vacío. El administrador lo crea en «Menú y recetas».</p>`;
   const categorias = menu.categorias.filter((c) => disponibles.some((pl) => pl.categoria_id === c.id));
   const sinCategoria = disponibles.some((pl) => !categorias.some((c) => c.id === pl.categoria_id));
+  // Si la categoría elegida ya no existe, se vuelve a «Todo».
+  const activa = elegida === "*" || categorias.some((c) => c.id === elegida) || (elegida === "" && sinCategoria) ? elegida : "*";
+  const pestana = (id, nombre) => `<button class="${id === activa ? "activo" : ""}" data-categoria="${id}">${esc(nombre)}</button>`;
   return `<div class="pestanas">
-      <button class="activo" data-categoria="*">Todo</button>
-      ${categorias.map((c) => `<button data-categoria="${c.id}">${esc(c.nombre)}</button>`).join("")}
-      ${sinCategoria ? `<button data-categoria="">Otros</button>` : ""}
+      ${pestana("*", "Todo")}
+      ${categorias.map((c) => pestana(c.id, c.nombre)).join("")}
+      ${sinCategoria ? pestana("", "Otros") : ""}
     </div>
-    <div class="platos">${disponibles.map((pl) => `<button class="plato" data-plato="${pl.id}" data-de="${categorias.some((c) => c.id === pl.categoria_id) ? pl.categoria_id : ""}">
-      <strong>${esc(pl.nombre)}</strong><span>${pesos(pl.precio)}</span></button>`).join("")}</div>`;
+    <div class="platos">${disponibles.map((pl) => {
+      const de = categorias.some((c) => c.id === pl.categoria_id) ? pl.categoria_id : "";
+      const n = toques.get(pl.id)?.n;
+      return `<button class="plato" data-plato="${pl.id}" data-de="${de}"${activa !== "*" && de !== activa ? " hidden" : ""}>
+        ${n ? `<span class="contador">+${n}</span>` : ""}<strong>${esc(pl.nombre)}</strong><span>${pesos(pl.precio)}</span></button>`;
+    }).join("")}</div>`;
+}
+
+// Tocar un plato sin modificadores suma 1 al contador del botón; al dejar de tocar se agregan
+// todos de una vez. Si el plato tiene modificadores, se abre la ventana para elegirlos.
+function tocarPlato(ctx, pedidoId, $boton) {
+  const platoId = $boton.dataset.plato;
+  const { platos, platoGrupos } = ctx.menu;
+  if (platoGrupos.some((pg) => pg.plato_id === platoId)) return elegirPlato(ctx, pedidoId, platoId);
+  const plato = platos.find((pl) => pl.id === platoId);
+  const toque = toques.get(platoId) ?? { n: 0 };
+  toque.n += 1;
+  clearTimeout(toque.temporizador);
+  toques.set(platoId, toque);
+  // Contador en el botón (se busca de nuevo por si la pantalla se volvió a pintar).
+  const $actual = document.querySelector(`[data-plato="${platoId}"]`) ?? $boton;
+  let $contador = $actual.querySelector(".contador");
+  if (!$contador) {
+    $contador = Object.assign(document.createElement("span"), { className: "contador" });
+    $actual.prepend($contador);
+  }
+  $contador.textContent = `+${toque.n}`;
+  toque.temporizador = setTimeout(async () => {
+    toques.delete(platoId);
+    try {
+      await api.agregarItem(pedidoId, platoId, toque.n, [], "");
+      aviso(`${toque.n} × ${plato.nombre} agregado${toque.n > 1 ? "s" : ""}`);
+    } catch (e) {
+      aviso(e.message);
+    }
+    ctx.refrescar();
+  }, ESPERA_TOQUES_MS);
 }
 
 // Al tocar un plato: si no tiene modificadores se agrega de una; si tiene, se eligen primero.
@@ -385,12 +436,7 @@ function elegirPlato(ctx, pedidoId, platoId) {
   const { platos, grupos, opciones: todas, platoGrupos } = ctx.menu;
   const plato = platos.find((pl) => pl.id === platoId);
   const susGrupos = grupos.filter((g) => platoGrupos.some((pg) => pg.plato_id === platoId && pg.grupo_id === g.id));
-  if (!susGrupos.length) {
-    api.agregarItem(pedidoId, platoId, 1, [], "")
-      .then(() => { aviso(`${plato.nombre} agregado`); ctx.refrescar(); })
-      .catch((e) => aviso(e.message));
-    return;
-  }
+  if (!susGrupos.length) return;
   const bloques = susGrupos.map((g) => {
     const tipo = g.maximo === 1 ? "radio" : "checkbox";
     const regla = `${g.obligatorio ? "Obligatorio" : "Opcional"}${g.maximo > 1 ? ` · hasta ${g.maximo}` : ""}`;
