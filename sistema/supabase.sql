@@ -275,8 +275,11 @@ begin
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon', t);
     execute format('grant select on public.%I to authenticated', t);
+    -- La clave secreta (usada por api/equipo.js para crear usuarios) necesita acceso completo.
+    execute format('grant all on public.%I to service_role', t);
   end loop;
 end $$;
+grant usage on schema public to service_role;
 
 -- Todo el equipo lee el menú, las mesas y los pedidos.
 do $$
