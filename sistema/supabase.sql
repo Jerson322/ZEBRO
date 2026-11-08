@@ -734,6 +734,7 @@ declare
   v_valor integer := 0;
   v_pago uuid;
   v_cierra boolean;
+  v_resta integer;
 begin
   perform exigir_rol('admin', 'cajero');
   if p_metodo not in ('Efectivo', 'Tarjeta', 'Transferencia', 'Nequi', 'Daviplata') then
@@ -777,16 +778,56 @@ begin
   v_cierra := not exists (
     select 1 from pedido_items where pedido_id = p_pedido and pago_id is null and id <> all (v_ids)
   );
-  if v_cierra then
-    v_valor := v_valor + v_pedido.envio;
-  end if;
+  -- Lo que falta por cobrar (la cuenta puede tener abonos por valor, ver «abonar»).
+  v_resta := (select coalesce(sum(precio * cantidad), 0) from pedido_items where pedido_id = p_pedido) + v_pedido.envio
+    - (select coalesce(sum(valor), 0) from pagos where pedido_id = p_pedido);
+  -- El último pago se lleva lo que falte (incluye el envío); ninguno cobra más de lo que falta.
+  v_valor := case when v_cierra then v_resta else least(v_valor, v_resta) end;
+  v_cierra := v_cierra or v_valor >= v_resta;
 
   insert into pagos (pedido_id, metodo, valor) values (p_pedido, p_metodo, v_valor) returning id into v_pago;
   update pedido_items set pago_id = v_pago where id = any (v_ids);
   if v_cierra then
+    update pedido_items set pago_id = v_pago where pedido_id = p_pedido and pago_id is null;
     perform cerrar_cuenta(p_pedido);
   end if;
   return jsonb_build_object('pago_id', v_pago, 'valor', v_valor, 'cerrada', v_cierra);
+end $$;
+
+-- Cobra un valor de la cuenta (dividir el total en partes: «entre 2», o lo que paga cada uno).
+-- Cuando lo abonado completa el total, la cuenta se cierra sola.
+create or replace function public.abonar(p_pedido uuid, p_valor integer, p_metodo text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_pedido pedidos;
+  v_resta integer;
+  v_pago uuid;
+begin
+  perform exigir_rol('admin', 'cajero');
+  if p_metodo not in ('Efectivo', 'Tarjeta', 'Transferencia', 'Nequi', 'Daviplata') then
+    raise exception 'Elige el método de pago';
+  end if;
+  select * into v_pedido from pedidos where id = p_pedido for update;
+  if not found or v_pedido.estado <> 'abierto' then
+    raise exception 'Esta cuenta ya está cerrada';
+  end if;
+  if not exists (select 1 from pedido_items where pedido_id = p_pedido) then
+    raise exception 'La cuenta no tiene platos';
+  end if;
+  v_resta := (select coalesce(sum(precio * cantidad), 0) from pedido_items where pedido_id = p_pedido) + v_pedido.envio
+    - (select coalesce(sum(valor), 0) from pagos where pedido_id = p_pedido);
+  if p_valor is null or p_valor < 1 then
+    raise exception 'Escribe el valor que se va a pagar';
+  end if;
+  if p_valor > v_resta then
+    raise exception 'Solo falta por cobrar $%', to_char(v_resta, 'FM999G999G999');
+  end if;
+  insert into pagos (pedido_id, metodo, valor) values (p_pedido, p_metodo, p_valor) returning id into v_pago;
+  if p_valor = v_resta then
+    update pedido_items set pago_id = v_pago where pedido_id = p_pedido and pago_id is null;
+    perform cerrar_cuenta(p_pedido);
+  end if;
+  return jsonb_build_object('pago_id', v_pago, 'valor', p_valor, 'cerrada', p_valor = v_resta, 'falta', v_resta - p_valor);
 end $$;
 
 -- Cobra todo lo que falta de la cuenta con un solo método. (La propina ya no se usa.)
@@ -963,7 +1004,7 @@ begin
     'mi_empleado()', 'cambiar_entrega(uuid, text)', 'registrar_novedad(uuid, text)', 'registrar_recibido(uuid, integer)',
     'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid)', 'enviar_cocina(uuid)',
     'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text)',
-    'cobrar_parte(uuid, jsonb, text)', 'cambiar_para_llevar(uuid, boolean)',
+    'cobrar_parte(uuid, jsonb, text)', 'abonar(uuid, integer, text)', 'cambiar_para_llevar(uuid, boolean)',
     'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()', 'impresiones_por_imprimir()',
     'asignar_numero_domicilio()'] loop
     execute format('revoke all on function public.%s from public, anon', f);

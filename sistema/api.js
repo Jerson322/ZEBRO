@@ -172,6 +172,8 @@ export const entregarPedido = (pedidoId) => rpc("entregar_pedido", { p_pedido: p
 // Ya no se cobra propina: siempre va en 0.
 export const cobrar = (pedidoId, metodo) => rpc("cobrar", { p_pedido: pedidoId, p_metodo: metodo, p_propina: 0 });
 // Cobra una parte de la cuenta: items = [{ id, cantidad }]. Devuelve { pago_id, valor, cerrada }.
+// Cobra un valor de la cuenta (cuenta dividida por partes). Devuelve { pago_id, valor, cerrada, falta }.
+export const abonar = (pedidoId, valor, metodo) => rpc("abonar", { p_pedido: pedidoId, p_valor: Number(valor), p_metodo: metodo });
 export const cobrarParte = (pedidoId, items, metodo) =>
   rpc("cobrar_parte", { p_pedido: pedidoId, p_items: items, p_metodo: metodo });
 export const cambiarParaLlevar = (pedidoId, paraLlevar) =>

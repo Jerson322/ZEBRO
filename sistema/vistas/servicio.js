@@ -414,11 +414,15 @@ function elegirPlato(ctx, pedidoId, platoId) {
 // Cobro normal: todo lo que falta, con un solo método. Si pagan por separado, «Multicuenta».
 function formularioCobro(ctx, p, titulo) {
   const pendientes = p.pedido_items.filter((i) => !i.pago_id);
-  const total = pendientes.reduce((s, i) => s + i.precio * i.cantidad, 0) + (p.envio || 0);
+  // Lo que falta: el total menos lo ya pagado (por productos o por partes).
+  const total = totalCuenta(p) - (p.pagos ?? []).reduce((s, x) => s + x.valor, 0);
   let resultado = null;
   let cobro = null;
   const $form = formulario(`Cobrar ${pesos(total)}`, `
-    <button type="button" id="abrir-multicuenta">⇄ Multicuenta · pagan por separado</button>
+    <div class="botones-domicilio" style="justify-content:stretch;margin:0">
+      <button type="button" id="abrir-dividir" style="flex:1">÷ Dividir el valor<br><small class="suave">entre 2, 3, 4 o lo que pague cada uno</small></button>
+      <button type="button" id="abrir-multicuenta" style="flex:1">⇄ Multicuenta<br><small class="suave">cada uno paga sus productos</small></button>
+    </div>
     <label>Método de pago<select name="metodo">${opciones(METODOS)}</select></label>
     <label>Recibido (efectivo)<input name="recibido" type="number" min="0" step="100" value="${p.recibido ?? ""}"></label>
     <div class="total"><span>Total a recibir</span><span>${pesos(total)}</span></div>
@@ -442,6 +446,128 @@ function formularioCobro(ctx, p, titulo) {
   $form.addEventListener("input", actualizar);
   actualizar();
   $form.querySelector("#abrir-multicuenta").addEventListener("click", () => multicuenta(ctx, p, titulo));
+  $form.querySelector("#abrir-dividir").addEventListener("click", () => dividirValor(ctx, p, titulo));
+}
+
+// Dividir el valor: lo que falta se reparte en partes iguales (entre 2, 3 o 4) o cada parte se
+// escribe a mano. Cada parte se cobra aparte, con su método. La última parte siempre es «lo que
+// falta», así la suma cuadra sola. Cuando se cobra la última, la cuenta se cierra.
+function dividirValor(ctx, pedidoInicial, titulo) {
+  let p = pedidoInicial;
+  const falta = () => totalCuenta(p) - (p.pagos ?? []).reduce((s, x) => s + x.valor, 0);
+  const pagosAntes = (p.pagos ?? []).length;
+  let partes = [];
+  let imprimirTickets = preferencia("cuenta");
+  let cobrando = false;
+
+  // Partes iguales redondeadas a $100; la última se queda con el resto.
+  const repartir = (n) => {
+    const resto = falta();
+    const base = Math.floor(resto / n / 100) * 100;
+    partes = Array.from({ length: n }, (_, k) => ({ valor: k === n - 1 ? resto - base * (n - 1) : base, metodo: METODOS[0], recibido: "" }));
+  };
+  // La última parte siempre completa lo que falta.
+  const cuadrar = () => {
+    if (!partes.length) return;
+    const otras = partes.slice(0, -1).reduce((s, x) => s + (Number(x.valor) || 0), 0);
+    partes[partes.length - 1].valor = Math.max(0, falta() - otras);
+  };
+  repartir(2);
+
+  function pintar() {
+    cuadrar();
+    const resto = falta();
+    const yaPagadas = (p.pagos ?? []).slice(pagosAntes);
+    const $c = mostrar(`
+      <div class="mc-cabeza"><h2>Dividir el valor · ${esc(titulo)}</h2>
+        <button type="button" class="icono-boton" id="dv-cerrar" aria-label="Cerrar">✕</button></div>
+      <div class="total" style="margin:0"><span>Falta por cobrar</span><span>${pesos(resto)}</span></div>
+      <div class="botones-domicilio" style="justify-content:flex-start;margin:0">
+        ${[2, 3, 4].map((n) => `<button type="button" class="chico${partes.length === n ? " principal" : ""}" data-entre="${n}">Entre ${n}</button>`).join("")}
+        <button type="button" class="chico" id="dv-mas">+ Agregar parte</button>
+      </div>
+      ${yaPagadas.map((x, k) => `<div class="item"><span>✓ Parte ${k + 1} · ${esc(x.metodo)}</span><span class="num">${pesos(x.valor)}</span></div>`).join("")}
+      ${partes.map((x, k) => {
+        const ultima = k === partes.length - 1;
+        const recibido = Number(x.recibido) || 0;
+        const numero = yaPagadas.length + k + 1;
+        return `<div class="panel" style="margin:0;display:flex;flex-direction:column;gap:8px">
+          <div class="mc-titulo"><span>Parte ${numero}${ultima ? ` <small class="suave">(lo que falta)</small>` : ""}</span>
+            ${partes.length > 1 ? `<button type="button" class="icono-boton" data-quitar-parte="${k}" aria-label="Quitar parte">✕</button>` : ""}</div>
+          <div class="fila">
+            <label>Valor<input type="number" min="0" step="100" data-valor="${k}" value="${x.valor}"${ultima ? " readonly" : ""}></label>
+            <label>Método<select data-metodo="${k}">${opciones(METODOS, x.metodo)}</select></label>
+          </div>
+          <input type="number" min="0" step="100" data-recibido="${k}" placeholder="Recibido en efectivo (opcional)" value="${esc(x.recibido)}">
+          ${recibido && x.valor ? `<small class="${recibido < x.valor ? "error" : "suave"}">${recibido < x.valor ? `Faltan ${pesos(x.valor - recibido)}` : `Cambio: ${pesos(recibido - x.valor)}`}</small>` : ""}
+          <button type="button" class="principal" data-cobrar-parte="${k}"${x.valor > 0 && !cobrando ? "" : " disabled"}>Cobrar ${pesos(x.valor)}</button>
+        </div>`;
+      }).join("")}
+      <label class="opcion"><input type="checkbox" id="dv-imprimir"${imprimirTickets ? " checked" : ""}> Imprimir el ticket de cada parte</label>`);
+
+    $c.querySelector("#dv-cerrar").addEventListener("click", cerrarDialogo);
+    $c.querySelector("#dv-imprimir").addEventListener("change", (e) => (imprimirTickets = e.target.checked));
+    $c.querySelectorAll("[data-entre]").forEach(($b) => $b.addEventListener("click", () => {
+      repartir(Number($b.dataset.entre));
+      pintar();
+    }));
+    $c.querySelector("#dv-mas").addEventListener("click", () => {
+      // La nueva parte arranca en 0; se escribe cuánto paga y la última se ajusta sola.
+      partes.splice(partes.length - 1, 0, { valor: 0, metodo: METODOS[0], recibido: "" });
+      pintar();
+    });
+    $c.querySelectorAll("[data-quitar-parte]").forEach(($b) => $b.addEventListener("click", () => {
+      partes.splice(Number($b.dataset.quitarParte), 1);
+      pintar();
+    }));
+    $c.querySelectorAll("[data-valor]").forEach(($i) => $i.addEventListener("change", () => {
+      partes[Number($i.dataset.valor)].valor = Math.max(0, Math.round(Number($i.value) || 0));
+      pintar();
+    }));
+    $c.querySelectorAll("[data-metodo]").forEach(($s) => $s.addEventListener("change", () => (partes[Number($s.dataset.metodo)].metodo = $s.value)));
+    $c.querySelectorAll("[data-recibido]").forEach(($i) => $i.addEventListener("change", () => {
+      partes[Number($i.dataset.recibido)].recibido = $i.value;
+      pintar();
+    }));
+    $c.querySelectorAll("[data-cobrar-parte]").forEach(($b) => $b.addEventListener("click", () => cobrarParte(Number($b.dataset.cobrarParte))));
+  }
+
+  async function cobrarParte(k) {
+    const x = partes[k];
+    if (cobrando || !(x.valor > 0)) return;
+    if (x.valor > falta()) return aviso(`Esa parte es mayor que lo que falta (${pesos(falta())})`);
+    cobrando = true;
+    const numero = (p.pagos ?? []).length - pagosAntes + 1;
+    try {
+      const resultado = await api.abonar(p.id, x.valor, x.metodo);
+      guardarPreferencia("cuenta", imprimirTickets);
+      if (imprimirTickets) {
+        const actual = await api.pedido(p.id);
+        await imprimir(ticketCuenta(actual, ctx.negocio, {
+          mesa: titulo, recibido: Number(x.recibido) || 0,
+          parte: { valor: resultado.valor, metodo: x.metodo, falta: resultado.falta, numero },
+        }));
+      }
+      if (resultado.cerrada) {
+        cerrarDialogo();
+        aviso("Cuenta cobrada");
+        ctx.ir(p.tipo === "mesa" ? "mesas" : "domicilios");
+        return;
+      }
+      aviso(`Parte ${numero}: ${pesos(resultado.valor)} con ${x.metodo}. Falta ${pesos(resultado.falta)}`);
+      partes.splice(k, 1);
+      p = await api.pedido(p.id);
+      if (!partes.length) partes = [{ valor: falta(), metodo: METODOS[0], recibido: "" }];
+    } catch (error) {
+      aviso(error.message);
+    } finally {
+      cobrando = false;
+    }
+    if (document.getElementById("dialogo").open) pintar();
+  }
+
+  document.getElementById("dialogo").addEventListener("close", () => ctx.refrescar(), { once: true });
+  pintar();
 }
 
 // Después de cada pago: imprime el ticket de ese pago (solo sus platos) y, si la cuenta quedó

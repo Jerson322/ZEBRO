@@ -78,11 +78,12 @@ export function ticketComanda(c) {
 }
 
 // Cuenta para el cliente. Si la cuenta sigue abierta, sale como "pre-cuenta".
-export function ticketCuenta(p, negocio, { mesa, recibido } = {}) {
+// parte: cuando la cuenta se divide por valor, { valor, metodo, falta, numero } de lo que paga esta persona.
+export function ticketCuenta(p, negocio, { mesa, recibido, parte } = {}) {
   const subtotal = p.pedido_items.reduce((s, i) => s + i.precio * i.cantidad, 0);
   const total = subtotal + (p.envio || 0);
-  const pagada = p.estado === "pagado";
-  const cambio = recibido ? recibido - total - (p.propina || 0) : 0;
+  const pagada = p.estado === "pagado" && !parte;
+  const cambio = recibido ? recibido - (parte ? parte.valor : total + (p.propina || 0)) : 0;
   const fila = (izq, der, clase = "") => `<div class="t-fila ${clase}"><span>${izq}</span><span>${der}</span></div>`;
   return `<div class="ticket">
     ${negocio?.logo ? `<div class="t-centro"><img class="t-logo" src="${esc(negocio.logo)}" alt=""></div>` : ""}
@@ -91,7 +92,7 @@ export function ticketCuenta(p, negocio, { mesa, recibido } = {}) {
     ${negocio?.direccion ? `<div class="t-centro">${esc(negocio.direccion)}</div>` : ""}
     ${negocio?.telefono ? `<div class="t-centro">Tel. ${esc(negocio.telefono)}</div>` : ""}
     <hr>
-    <div>${pagada ? "Cuenta" : "PRE-CUENTA"} #${p.numero} · ${fechaHora(p.cerrado ?? new Date())}</div>
+    <div>${pagada ? "Cuenta" : parte ? "PAGO DIVIDIDO" : "PRE-CUENTA"} #${p.numero} · ${fechaHora(p.cerrado ?? new Date())}</div>
     <div>${p.tipo === "mesa" ? esc(mesa ?? "Mesa") + (p.para_llevar ? " · Para llevar" : "") : `Domicilio #${p.numero_domicilio ?? p.numero}: ${esc(p.cliente)}`}</div>
     ${p.tipo === "domicilio" && p.direccion ? `<div>${esc(p.direccion)}</div>` : ""}
     ${p.tipo === "domicilio" && p.telefono ? `<div>Tel. ${esc(p.telefono)}</div>` : ""}
@@ -103,6 +104,10 @@ export function ticketCuenta(p, negocio, { mesa, recibido } = {}) {
     ${pagada && p.propina ? fila("Propina", pesos(p.propina)) + fila("Total pagado", pesos(total + p.propina)) : ""}
     ${pagada ? fila("Pago", esc(p.metodo_pago)) : ""}
     ${pagada && cambio > 0 ? fila("Recibido", pesos(recibido)) + fila("Cambio", pesos(cambio)) : ""}
+    ${parte ? `<hr>${fila(`PAGA${parte.numero ? ` (parte ${parte.numero})` : ""}`, pesos(parte.valor), "t-total")}
+      ${fila("Pago", esc(parte.metodo))}
+      ${cambio > 0 ? fila("Recibido", pesos(recibido)) + fila("Cambio", pesos(cambio)) : ""}
+      ${fila(parte.falta ? "Queda por cobrar" : "Cuenta pagada", parte.falta ? pesos(parte.falta) : "✓")}` : ""}
     <hr>
     ${negocio?.pie ? `<div class="t-centro">${esc(negocio.pie)}</div>` : ""}
     <div class="t-centro t-chico">Documento no válido como factura</div>
