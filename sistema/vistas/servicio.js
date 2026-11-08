@@ -154,7 +154,7 @@ export async function domicilios($vista, ctx) {
           ${puedeEntregar(rol, p) && p.entrega !== "entregado"
             ? `${p.entrega === "preparando" ? `<button class="chico" data-pedido="${p.id}" data-entrega="en_camino">En camino</button>` : ""}
                <button class="chico principal" data-pedido="${p.id}" data-entrega="entregado">Entregado</button>` : ""}
-          <a class="boton chico" href="#pedido/${p.id}">Ver</a>
+          <a class="boton chico" href="#pedido/${p.id}">${p.estado === "abierto" && !domiciliario ? "Abrir / agregar" : "Ver"}</a>
         </span></span>
     </div>`;
   const lista = (pedidos, vacio) => pedidos.length
@@ -306,6 +306,7 @@ export async function cuenta($vista, ctx, pedidoId) {
         </div>
         ${abierta && !soloLectura && items.length ? `<button class="ver-cuenta" id="ver-cuenta">${platosEnCuenta(items)} · Ver cuenta <strong>${pesos(totalMostrado(p))}</strong></button>` : ""}
         ${abierta && !soloLectura ? `<div class="acciones-cuenta">
+          ${items.length ? `<button id="agregar-productos">+ Agregar productos</button>` : ""}
           ${hay("nuevo") ? `<button class="principal" id="enviar">Enviar a cocina</button>` : ""}
           ${(hay("cocina") || hay("listo")) && !esDomicilio ? `<button id="entregar">Marcar entregado</button>` : ""}
           ${items.length ? `<button id="precuenta">Imprimir cuenta</button>` : ""}
@@ -346,6 +347,11 @@ export async function cuenta($vista, ctx, pedidoId) {
   // En el celular la cuenta queda debajo de la carta: este botón lleva hasta ella.
   document.getElementById("ver-cuenta")?.addEventListener("click", () =>
     $vista.querySelector(".resumen").scrollIntoView({ behavior: "smooth", block: "start" }));
+  // El cliente pide más: lleva a la carta. Lo nuevo queda "Sin enviar" hasta darle «Enviar a cocina».
+  document.getElementById("agregar-productos")?.addEventListener("click", () => {
+    $vista.querySelector(".carta").scrollIntoView({ behavior: "smooth", block: "start" });
+    aviso("Toca los platos que pidió. Luego dale «Enviar a cocina».");
+  });
   document.getElementById("anular")?.addEventListener("click", () => {
     const motivo = prompt("¿Por qué se anula? (Si ya estaba pagada, el inventario se devuelve)");
     if (motivo === null) return;
