@@ -64,6 +64,46 @@
       width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center;
       background: var(--texto); color: #fff; font-weight: 800; font-size: 18px; letter-spacing: 0;
     }
+    .logo.con-imagen { background: transparent; overflow: hidden; }
+    .logo img { width: 100%; height: 100%; object-fit: contain; }
+    .logo-ajustes { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .logo-grande { width: 72px; height: 72px; border-radius: 20px; font-size: 32px; }
+    .logo-grande:has(img) { background: var(--fondo); }
+
+    /* Bienvenida al entrar */
+    #bienvenida {
+      position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; overflow: hidden; cursor: pointer;
+      background: radial-gradient(circle at 50% 40%, #2a2d3a 0%, #14161f 70%); color: #fff;
+      animation: bv-entrar 0.4s ease-out both;
+    }
+    #bienvenida.saliendo { animation: bv-salir 0.5s ease-in forwards; }
+    .bv-brillo {
+      position: absolute; width: 520px; height: 520px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(255, 90, 31, 0.45), transparent 65%); filter: blur(20px);
+      animation: bv-latido 2.4s ease-in-out infinite;
+    }
+    .bv-centro { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px; text-align: center; }
+    .bv-logo {
+      width: 112px; height: 112px; border-radius: 30px; font-size: 52px; background: var(--acento); color: #fff;
+      box-shadow: 0 20px 60px rgba(255, 90, 31, 0.45); margin-bottom: 10px;
+      animation: bv-logo 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both;
+    }
+    .bv-logo.con-imagen { background: #fff; padding: 10px; }
+    .bv-hola { margin: 0; font-size: 18px; color: rgba(255, 255, 255, 0.75); animation: bv-subir 0.6s ease-out 0.5s both; }
+    .bv-nombre { margin: 0; font-size: clamp(34px, 8vw, 60px); font-weight: 800; letter-spacing: 2px; animation: bv-subir 0.7s ease-out 0.7s both; }
+    .bv-rol { margin: 0; font-size: 15px; color: #ffb38f; animation: bv-subir 0.6s ease-out 0.95s both; }
+    .bv-carga { width: 160px; height: 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.15); margin-top: 18px; overflow: hidden; }
+    .bv-carga span { display: block; height: 100%; background: var(--acento); animation: bv-cargar 2.4s ease-in-out 0.3s both; }
+    @keyframes bv-entrar { from { opacity: 0; } }
+    @keyframes bv-salir { to { opacity: 0; transform: scale(1.04); } }
+    @keyframes bv-logo { from { opacity: 0; transform: scale(0.3) rotate(-25deg); } }
+    @keyframes bv-subir { from { opacity: 0; transform: translateY(18px); } }
+    @keyframes bv-cargar { from { width: 0; } to { width: 100%; } }
+    @keyframes bv-latido { 50% { transform: scale(1.12); opacity: 0.75; } }
+    @media (prefers-reduced-motion: reduce) {
+      #bienvenida, #bienvenida *, #bienvenida.saliendo { animation-duration: 0.01s !important; animation-delay: 0s !important; }
+    }
+
     .secciones { display: flex; flex-direction: column; gap: 4px; }
     .secciones a {
       display: flex; align-items: center; gap: 12px;

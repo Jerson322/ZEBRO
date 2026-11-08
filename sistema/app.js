@@ -99,7 +99,7 @@ async function pintarAhora() {
   }
   $menu.hidden = false;
   $menu.innerHTML =
-    `<div class="marca"><span class="logo">Z</span><span>ZEBRO</span></div>` +
+    `<div class="marca">${logoNegocio()}<span>${esc(nombreNegocio())}</span></div>` +
     `<div class="secciones">${seccionesPermitidas()
       .map((s) => `<a href="#${s.id}" class="${s.id === seccion.id || (seccion === CUENTA && s.id === "mesas") ? "activo" : ""}">${iconos[s.id]}<span data-corto="${s.corto ?? s.nombre}">${s.nombre}</span></a>`)
       .join("")}</div>` +
@@ -186,7 +186,7 @@ function pantallaLogin() {
     $boton.disabled = true;
     try {
       await api.iniciarSesion(correo, clave);
-      await entrar();
+      await entrar({ bienvenida: true });
     } catch (error) {
       const $error = $form.querySelector(".error");
       $error.textContent = error.message;
@@ -221,7 +221,7 @@ function pantallaSinRol() {
   });
 }
 
-async function entrar() {
+async function entrar({ bienvenida = false } = {}) {
   try {
     const usuario = await api.usuarioActual();
     if (!usuario) return pantallaLogin();
@@ -229,6 +229,8 @@ async function entrar() {
     if (!ctx.perfil || !ctx.perfil.activo) return pantallaSinRol();
     await ctx.recargarMenu();
     ctx.negocio = await api.negocio();
+    document.title = nombreNegocio();
+    if (bienvenida) mostrarBienvenida();
     dejarDeEscuchar?.();
     dejarDeEscuchar = api.escucharPedidos(alCambiarEnVivo);
     // Respaldo por si se pierde algún aviso en vivo (por ejemplo, tras un corte de internet).
@@ -239,6 +241,44 @@ async function entrar() {
   } catch (error) {
     pantallaError(error.message || "No pudimos cargar el sistema. Revisa tu conexión.");
   }
+}
+
+// Nombre y logo del restaurante (Ajustes). Sin logo, la inicial del nombre.
+const nombreNegocio = () => ctx.negocio?.nombre?.trim() || "ZEBRO";
+function logoNegocio(clase = "logo") {
+  return ctx.negocio?.logo
+    ? `<span class="${clase} con-imagen"><img src="${esc(ctx.negocio.logo)}" alt=""></span>`
+    : `<span class="${clase}">${esc(nombreNegocio().charAt(0).toUpperCase())}</span>`;
+}
+
+// Animación de bienvenida al entrar: logo, nombre del restaurante y saludo. Se quita sola
+// (o tocándola). Si el equipo pide menos movimiento, solo aparece y desaparece.
+function mostrarBienvenida() {
+  document.getElementById("bienvenida")?.remove();
+  const hora = new Date().getHours();
+  const saludo = hora < 12 ? "Buenos días" : hora < 19 ? "Buenas tardes" : "Buenas noches";
+  const $b = document.createElement("div");
+  $b.id = "bienvenida";
+  $b.setAttribute("role", "status");
+  $b.innerHTML = `
+    <div class="bv-brillo"></div>
+    <div class="bv-centro">
+      ${logoNegocio("logo bv-logo")}
+      <p class="bv-hola">${saludo}, ${esc(ctx.perfil.nombre.split(" ")[0])}</p>
+      <h1 class="bv-nombre">${esc(nombreNegocio())}</h1>
+      <p class="bv-rol">${ROLES[ctx.perfil.rol] ?? ""} · ¡Bienvenido!</p>
+      <div class="bv-carga"><span></span></div>
+    </div>`;
+  document.body.append($b);
+  const quitar = () => {
+    $b.classList.add("saliendo");
+    setTimeout(() => $b.remove(), 500);
+  };
+  const temporizador = setTimeout(quitar, 2800);
+  $b.addEventListener("click", () => {
+    clearTimeout(temporizador);
+    quitar();
+  });
 }
 
 async function salir() {

@@ -270,6 +270,10 @@ create table if not exists public.negocio (
   pie text not null default '¡Gracias por tu visita!'
 );
 insert into public.negocio (id) values (1) on conflict (id) do nothing;
+-- Logo del restaurante (imagen pequeña guardada como texto). Sale en el panel y en la bienvenida.
+alter table public.negocio add column if not exists logo text not null default '';
+alter table public.negocio drop constraint if exists negocio_logo_tamano;
+alter table public.negocio add constraint negocio_logo_tamano check (length(logo) <= 500000);
 
 create table if not exists public.gastos (
   id uuid primary key default gen_random_uuid(),
