@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ZEBRO · Sistema</title>
+  <title>ZEBRO · Restaurante</title>
   <meta name="robots" content="noindex">
   <style>
     :root {
@@ -16,17 +16,18 @@
       --positivo: #1b7f4b;
       --negativo: #c0362c;
       --alerta: #fdf1dc;
+      --listo: #e3f4ea;
     }
     * { box-sizing: border-box; }
     html, body {
       margin: 0;
-      height: 100%;
+      min-height: 100%;
       background: var(--fondo);
       color: var(--texto);
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       font-size: 15px;
     }
-    .app { display: flex; min-height: 100%; }
+    .app { display: flex; min-height: 100vh; }
     nav {
       width: 200px;
       flex-shrink: 0;
@@ -37,55 +38,42 @@
       flex-direction: column;
       gap: 2px;
     }
-    nav .marca { font-weight: 700; letter-spacing: 2px; font-size: 20px; padding: 6px 10px 16px; }
-    nav a {
-      color: #cfcfcf;
-      text-decoration: none;
-      padding: 10px;
-      border-radius: 8px;
-    }
-    nav a:hover { color: #fff; }
     nav[hidden] { display: none; }
-    nav .pie { margin-top: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; color: #aaa; }
-    .negativo-claro { color: #ff9c92; }
-    .acceso { max-width: 360px; margin: 10vh auto 0; display: flex; flex-direction: column; gap: 12px; }
-    .acceso h1 { letter-spacing: 2px; }
-    .acceso p { margin: 0; }
+    nav .marca { font-weight: 700; letter-spacing: 2px; font-size: 20px; padding: 6px 10px 16px; }
+    nav a { color: #cfcfcf; text-decoration: none; padding: 10px; border-radius: 8px; }
+    nav a:hover { color: #fff; }
     nav a.activo { background: #fff; color: #000; font-weight: 600; }
-    main { flex: 1; min-width: 0; padding: 24px; max-width: 1100px; }
-    .encabezado {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
-    }
+    nav .pie { margin-top: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; color: #aaa; }
+    main { flex: 1; min-width: 0; padding: 24px; max-width: 1200px; }
+    .encabezado { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
     h1 { margin: 0; font-size: 24px; }
-    h2 { margin: 0 0 10px; font-size: 16px; }
-    .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    h2 { margin: 16px 0 10px; font-size: 16px; }
+    .panel h2:first-child, .encabezado h2 { margin-top: 0; }
+    a.volver { color: inherit; text-decoration: none; padding-right: 4px; }
+    .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
     .tarjeta, .panel { background: var(--panel); border: 1px solid var(--borde); border-radius: 10px; padding: 14px; }
-    .panel { margin-bottom: 16px; overflow-x: auto; }
+    .panel { margin-bottom: 16px; }
     .tarjeta small { color: var(--suave); display: block; margin-bottom: 4px; }
     .tarjeta strong { font-size: 21px; }
-    .columnas { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .columnas { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 16px; }
     .columnas .panel { margin-bottom: 0; }
-    .columnas { margin-bottom: 16px; }
+    .tabla { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; }
     th { text-align: left; font-size: 13px; color: var(--suave); font-weight: 600; }
     th, td { padding: 8px 6px; border-bottom: 1px solid var(--borde); white-space: nowrap; }
     tr:last-child td { border-bottom: 0; }
     td.ancho { white-space: normal; min-width: 140px; }
     .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .acciones { text-align: right; }
     .positivo { color: var(--positivo); }
     .negativo { color: var(--negativo); }
     .suave { color: var(--suave); }
     .vacio { color: var(--suave); padding: 12px 0; margin: 0; }
-    .alerta { background: var(--alerta); border: 1px solid #efd9ad; border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; }
-    .etiqueta { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--fondo); }
-    .anulada td { color: var(--suave); text-decoration: line-through; }
-    .anulada td.acciones { text-decoration: none; }
-    .acciones { text-align: right; }
+    .etiqueta { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--fondo); border: 1px solid var(--borde); }
+    .estado-listo { background: var(--listo); border-color: #b9dfc8; }
+    .estado-nuevo { background: var(--alerta); border-color: #efd9ad; }
+    .anulada td, tr.inactivo td { color: var(--suave); }
+    .anulada td:not(.acciones) { text-decoration: line-through; }
     button, .boton {
       font: inherit;
       cursor: pointer;
@@ -95,11 +83,15 @@
       background: var(--panel);
       color: var(--texto);
       display: inline-block;
+      text-decoration: none;
     }
+    button:disabled { opacity: 0.5; cursor: default; }
     button.principal { background: #111; border-color: #111; color: #fff; font-weight: 600; }
-    button.chico { padding: 4px 8px; font-size: 13px; }
+    button.chico, .boton.chico { padding: 4px 8px; font-size: 13px; }
     button.peligro { color: var(--negativo); }
     label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--suave); }
+    label.opcion { flex-direction: row; align-items: center; gap: 8px; font-size: 15px; color: var(--texto); padding: 4px 0; }
+    label.opcion input { width: auto; }
     input, select {
       font: inherit;
       color: var(--texto);
@@ -110,8 +102,58 @@
       width: 100%;
       min-width: 0;
     }
+    fieldset { border: 1px solid var(--borde); border-radius: 8px; margin: 0; padding: 8px 12px; }
+    legend { font-weight: 600; padding: 0 4px; }
     .filtros { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 16px; }
     .filtros label { width: 160px; }
+    .pestanas { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .pestanas button.activo { background: #111; color: #fff; border-color: #111; }
+    .lista { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+    .fila-lista { display: flex; gap: 8px; }
+    .fila { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
+    .linea { display: grid; grid-template-columns: 1fr 110px 32px; gap: 8px; align-items: center; }
+    .total { display: flex; justify-content: space-between; font-size: 18px; font-weight: 700; border-top: 1px solid var(--borde); padding-top: 10px; margin-top: 4px; }
+    .error { color: var(--negativo); margin: 0; font-size: 14px; }
+    .botones { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+    /* Mesas y domicilios */
+    .mesas { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+    .mesa { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px; min-height: 100px; text-align: left; }
+    .mesa strong { font-size: 18px; }
+    .mesa.libre span { color: var(--suave); }
+    .mesa.ocupada { background: #111; color: #fff; border-color: #111; }
+    .mesa.ocupada small { color: #ccc; }
+    .mesa.listo { background: var(--positivo); border-color: var(--positivo); }
+    .mesa.listo small { color: #fff; font-weight: 600; }
+    .lista-domicilios { display: flex; flex-direction: column; gap: 8px; }
+    .domicilio { display: flex; justify-content: space-between; gap: 12px; text-align: left; padding: 12px 14px; }
+
+    /* Cuenta */
+    .cuenta { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+    .platos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+    .plato { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; min-height: 72px; }
+    .plato[hidden] { display: none; }
+    .plato span { color: var(--suave); }
+    .item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--borde); }
+    .item .num button { margin-top: 4px; }
+    .item:has(+ .total) { border-bottom: 0; }
+    .acciones-cuenta { display: flex; flex-wrap: wrap; gap: 8px; }
+    .acciones-cuenta button { flex: 1; min-width: 140px; padding: 12px; }
+
+    /* Cocina */
+    .comandas { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .comanda { background: var(--panel); border: 2px solid var(--borde); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .comanda.demorada { border-color: var(--negativo); }
+    .comanda-cabeza { display: flex; justify-content: space-between; gap: 8px; }
+    .comanda.demorada .comanda-cabeza span { color: var(--negativo); font-weight: 700; }
+    .comanda ul { margin: 0; padding-left: 18px; }
+    .comanda li { margin-bottom: 6px; }
+
+    /* Acceso, diálogos y avisos */
+    .acceso { max-width: 380px; margin: 10vh auto 0; display: flex; flex-direction: column; gap: 12px; }
+    .acceso h1 { letter-spacing: 2px; }
+    .acceso p { margin: 0; }
+    .acceso form { display: flex; flex-direction: column; gap: 12px; }
     dialog {
       width: min(560px, calc(100vw - 32px));
       max-height: calc(100vh - 32px);
@@ -122,14 +164,25 @@
       color: var(--texto);
     }
     dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-    dialog form, .comprobante { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+    dialog form, dialog .contenido { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
     dialog h2 { margin: 0; font-size: 18px; }
-    .fila { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .linea { display: grid; grid-template-columns: 1fr 70px 110px 32px; gap: 8px; align-items: center; }
-    .total { display: flex; justify-content: space-between; font-size: 18px; font-weight: 700; border-top: 1px solid var(--borde); padding-top: 10px; }
-    .error { color: var(--negativo); margin: 0; font-size: 14px; }
-    .botones { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    #aviso {
+      position: fixed;
+      left: 50%;
+      bottom: 20px;
+      transform: translateX(-50%);
+      background: #111;
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 8px;
+      z-index: 10;
+      max-width: calc(100vw - 32px);
+    }
+    #aviso[hidden] { display: none; }
 
+    @media (max-width: 860px) {
+      .cuenta { grid-template-columns: 1fr; }
+    }
     @media (max-width: 760px) {
       .app { flex-direction: column; }
       nav {
@@ -146,22 +199,23 @@
       nav a { white-space: nowrap; padding: 10px 12px; }
       nav .pie { margin: 0 0 0 auto; padding: 4px 8px; flex-direction: row; align-items: center; white-space: nowrap; }
       main { padding: 16px; }
-      .linea { grid-template-columns: 1fr 60px 90px 32px; }
+      .mesas, .platos { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
     }
     @media print {
-      body > .app { display: none; }
-      dialog { position: static; border: 0; width: 100%; max-height: none; }
-      dialog::backdrop { display: none; }
-      .botones { display: none; }
+      nav, .carta, .acciones-cuenta, a.volver, #aviso { display: none !important; }
+      main { padding: 0; }
+      .cuenta { display: block; }
+      .panel { border: 0; }
     }
   </style>
 </head>
 <body>
   <div class="app">
-    <nav id="menu"></nav>
+    <nav id="menu" hidden></nav>
     <main id="vista"></main>
   </div>
   <dialog id="dialogo"></dialog>
+  <div id="aviso" role="status" hidden></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"
     integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" crossorigin="anonymous"></script>
   <script type="module" src="/sistema/app.js"></script>
