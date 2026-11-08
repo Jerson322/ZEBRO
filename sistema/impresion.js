@@ -52,6 +52,7 @@ export function ticketComanda(c) {
   const destino = c.tipo === "mesa" ? (c.mesa ?? "Mesa") : `DOMICILIO #${c.numero_domicilio ?? c.numero}`;
   return `<div class="ticket comanda-ticket">
     <div class="t-grande">${esc(destino)}</div>
+    ${c.para_llevar ? `<div class="t-grande">** PARA LLEVAR **</div>` : ""}
     ${c.tipo === "domicilio" && c.cliente ? `<div>${esc(c.cliente)}</div>` : ""}
     <div>Pedido #${c.numero} · ${fechaHora(c.enviado)}</div>
     ${c.atiende ? `<div>Atiende: ${esc(c.atiende)}</div>` : ""}
@@ -75,7 +76,7 @@ export function ticketCuenta(p, negocio, { mesa, recibido } = {}) {
     ${negocio?.telefono ? `<div class="t-centro">Tel. ${esc(negocio.telefono)}</div>` : ""}
     <hr>
     <div>${pagada ? "Cuenta" : "PRE-CUENTA"} #${p.numero} · ${fechaHora(p.cerrado ?? new Date())}</div>
-    <div>${p.tipo === "mesa" ? esc(mesa ?? "Mesa") : `Domicilio #${p.numero_domicilio ?? p.numero}: ${esc(p.cliente)}`}</div>
+    <div>${p.tipo === "mesa" ? esc(mesa ?? "Mesa") + (p.para_llevar ? " · Para llevar" : "") : `Domicilio #${p.numero_domicilio ?? p.numero}: ${esc(p.cliente)}`}</div>
     ${p.tipo === "domicilio" && p.direccion ? `<div>${esc(p.direccion)}</div>` : ""}
     ${p.tipo === "domicilio" && p.telefono ? `<div>Tel. ${esc(p.telefono)}</div>` : ""}
     <hr>

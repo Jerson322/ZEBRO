@@ -12,6 +12,7 @@ function comanda(p, nombre, items) {
   const minutos = minutosDesde(desde);
   return `<div class="comanda ${minutos >= MINUTOS_DEMORA ? "demorada" : ""}">
     <div class="comanda-cabeza"><strong>${esc(nombre)}</strong><span>${minutos} min</span></div>
+    ${p.para_llevar ? `<p class="etiqueta" style="margin:0 0 8px">Para llevar</p>` : ""}
     <ul>${items.map((i) => {
       const detalle = [...i.opciones.map((o) => o.nombre), i.nota].filter(Boolean).join(" · ");
       return `<li><strong>${i.cantidad}× ${esc(i.nombre)}</strong>${detalle ? `<br><small>${esc(detalle)}</small>` : ""}</li>`;
@@ -41,7 +42,7 @@ export async function pintar($vista, ctx) {
     $b.addEventListener("click", () => {
       const { p, items } = preparando.find((x) => x.p.id === $b.dataset.reimprimir);
       imprimir(ticketComanda({
-        tipo: p.tipo, numero: p.numero, numero_domicilio: p.numero_domicilio, cliente: p.cliente, mesa: mesas.find((m) => m.id === p.mesa_id)?.nombre,
+        tipo: p.tipo, numero: p.numero, numero_domicilio: p.numero_domicilio, cliente: p.cliente, para_llevar: p.para_llevar, mesa: mesas.find((m) => m.id === p.mesa_id)?.nombre,
         enviado: items[0].creado, items,
       }));
     })

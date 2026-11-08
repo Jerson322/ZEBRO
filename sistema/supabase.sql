@@ -243,6 +243,23 @@ create index if not exists items_por_pedido on public.pedido_items (pedido_id);
 -- Cuándo se imprimió la comanda de cada plato (null = falta imprimir).
 alter table public.pedido_items add column if not exists impreso timestamptz;
 
+-- Mesa para comer aquí o para llevar (el cliente espera en el local).
+alter table public.pedidos add column if not exists para_llevar boolean not null default false;
+
+-- Pagos de una cuenta. Una cuenta se puede pagar por partes: cada persona paga sus platos
+-- con su propio método. La cuenta se cierra cuando ya no queda nada sin pagar.
+create table if not exists public.pagos (
+  id uuid primary key default gen_random_uuid(),
+  pedido_id uuid not null references public.pedidos (id) on delete cascade,
+  metodo text not null,
+  valor integer not null check (valor >= 0),
+  fecha timestamptz not null default now(),
+  usuario uuid default auth.uid()
+);
+create index if not exists pagos_por_pedido on public.pagos (pedido_id);
+-- Con qué pago se pagó cada plato (null = falta por pagar).
+alter table public.pedido_items add column if not exists pago_id uuid references public.pagos (id) on delete set null;
+
 -- Datos del negocio para los tickets. Siempre una sola fila.
 create table if not exists public.negocio (
   id integer primary key default 1 check (id = 1),
@@ -271,7 +288,7 @@ declare
   t text;
 begin
   foreach t in array array['miembros', 'negocio', 'categorias', 'platos', 'insumos', 'recetas', 'grupos_mod', 'opciones_mod',
-    'plato_grupos', 'movimientos', 'mesas', 'empleados', 'pedidos', 'pedido_items', 'gastos'] loop
+    'plato_grupos', 'movimientos', 'mesas', 'empleados', 'pedidos', 'pedido_items', 'pagos', 'gastos'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon', t);
     execute format('grant select on public.%I to authenticated', t);
@@ -313,6 +330,10 @@ create policy "equipo lee" on public.pedidos for select to authenticated using (
 );
 drop policy if exists "equipo lee" on public.pedido_items;
 create policy "equipo lee" on public.pedido_items for select to authenticated using (
+  rol_actual() is not null and exists (select 1 from pedidos p where p.id = pedido_id)
+);
+drop policy if exists "equipo lee" on public.pagos;
+create policy "equipo lee" on public.pagos for select to authenticated using (
   rol_actual() is not null and exists (select 1 from pedidos p where p.id = pedido_id)
 );
 
@@ -568,7 +589,7 @@ declare
 begin
   perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
   select i.estado into v_estado from pedido_items i join pedidos p on p.id = i.pedido_id
-  where i.id = p_item and p.estado = 'abierto';
+  where i.id = p_item and p.estado = 'abierto' and i.pago_id is null;
   if not found then
     raise exception 'Ese plato ya no se puede quitar';
   end if;
@@ -597,6 +618,18 @@ begin
   return v_total;
 end $$;
 
+-- Marca la cuenta de una mesa como "para llevar" o "para comer aquí".
+create or replace function public.cambiar_para_llevar(p_pedido uuid, p_para_llevar boolean) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
+  update pedidos set para_llevar = coalesce(p_para_llevar, false)
+  where id = p_pedido and tipo = 'mesa' and estado = 'abierto';
+  if not found then
+    raise exception 'Esa cuenta ya está cerrada';
+  end if;
+end $$;
+
 -- Cocina tiene un solo paso: todo lo que está preparándose de un pedido se marca entregado de una vez.
 create or replace function public.entregar_pedido(p_pedido uuid) returns void
 language plpgsql security definer set search_path = public as $$
@@ -619,27 +652,17 @@ begin
   update pedido_items set estado = p_a where pedido_id = p_pedido and estado = p_de;
 end $$;
 
--- Cobra la cuenta: fija el total y descuenta del inventario la receta de cada plato y los
--- insumos de sus modificadores. El stock puede quedar negativo: es mejor vender y corregir
--- el inventario que frenar el servicio.
-create or replace function public.cobrar(p_pedido uuid, p_metodo text, p_propina integer) returns integer
+-- Cierra una cuenta ya pagada del todo: fija el total y descuenta del inventario la receta de
+-- cada plato y los insumos de sus modificadores. El stock puede quedar negativo: es mejor vender
+-- y corregir el inventario que frenar el servicio. Uso interno: la llama cobrar_parte.
+create or replace function public.cerrar_cuenta(p_pedido uuid) returns integer
 language plpgsql security definer set search_path = public as $$
 declare
   v_pedido pedidos;
   v_total integer;
   v_consumo record;
 begin
-  perform exigir_rol('admin', 'cajero');
-  if p_metodo not in ('Efectivo', 'Tarjeta', 'Transferencia', 'Nequi', 'Daviplata') then
-    raise exception 'Elige el método de pago';
-  end if;
   select * into v_pedido from pedidos where id = p_pedido for update;
-  if not found or v_pedido.estado <> 'abierto' then
-    raise exception 'Esta cuenta ya está cerrada';
-  end if;
-  if not exists (select 1 from pedido_items where pedido_id = p_pedido) then
-    raise exception 'La cuenta no tiene platos';
-  end if;
 
   -- Consumo de insumos de toda la cuenta.
   create temporary table if not exists _consumo (item_id uuid, insumo_id uuid, cantidad numeric) on commit drop;
@@ -677,9 +700,11 @@ begin
   update pedidos set
     estado = 'pagado',
     total = v_total,
-    propina = greatest(coalesce(p_propina, 0), 0),
+    propina = 0,
     costo = (select coalesce(sum(costo * cantidad), 0) from pedido_items where pedido_id = p_pedido),
-    metodo_pago = p_metodo,
+    -- Si se pagó con un solo método queda ese; si se dividió entre varios métodos, "Varios".
+    metodo_pago = (select case when count(distinct metodo) = 1 then min(metodo) else 'Varios' end
+                   from pagos where pedido_id = p_pedido),
     cerrado = now(),
     -- Si un domicilio se cobra antes de enviarlo a cocina, pasa a preparación y se manda a cocina.
     entrega = case when tipo = 'domicilio' then coalesce(entrega, 'preparando') else entrega end
@@ -688,6 +713,92 @@ begin
     update pedido_items set estado = 'cocina' where pedido_id = p_pedido and estado = 'nuevo';
   end if;
   return v_total;
+end $$;
+
+-- Cobra una parte de la cuenta: los platos (y cuántos de cada uno) que paga una persona, con su
+-- método de pago. p_items = [{"id": plato de la cuenta, "cantidad": n}]. Si de un plato se paga
+-- solo una parte (1 de 2 gourmet), se separa en dos líneas. El envío va en el pago que cierra la
+-- cuenta. Cuando ya no queda nada por pagar, la cuenta se cierra sola.
+create or replace function public.cobrar_parte(p_pedido uuid, p_items jsonb, p_metodo text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_pedido pedidos;
+  v_sel record;
+  v_item pedido_items;
+  v_ids uuid[] := '{}';
+  v_nuevo uuid;
+  v_valor integer := 0;
+  v_pago uuid;
+  v_cierra boolean;
+begin
+  perform exigir_rol('admin', 'cajero');
+  if p_metodo not in ('Efectivo', 'Tarjeta', 'Transferencia', 'Nequi', 'Daviplata') then
+    raise exception 'Elige el método de pago';
+  end if;
+  select * into v_pedido from pedidos where id = p_pedido for update;
+  if not found or v_pedido.estado <> 'abierto' then
+    raise exception 'Esta cuenta ya está cerrada';
+  end if;
+
+  for v_sel in
+    select (e ->> 'id')::uuid as id, sum((e ->> 'cantidad')::integer) as cantidad
+    from jsonb_array_elements(coalesce(p_items, '[]')) as e
+    group by 1
+  loop
+    continue when coalesce(v_sel.cantidad, 0) < 1;
+    select * into v_item from pedido_items
+    where id = v_sel.id and pedido_id = p_pedido and pago_id is null for update;
+    if not found then
+      raise exception 'Uno de los platos ya se pagó o no es de esta cuenta';
+    end if;
+    if v_sel.cantidad > v_item.cantidad then
+      raise exception 'De % solo hay %', v_item.nombre, v_item.cantidad;
+    end if;
+    if v_sel.cantidad < v_item.cantidad then
+      update pedido_items set cantidad = cantidad - v_sel.cantidad where id = v_item.id;
+      insert into pedido_items (pedido_id, plato_id, nombre, precio, cantidad, opciones, nota, estado, creado, impreso)
+      values (v_item.pedido_id, v_item.plato_id, v_item.nombre, v_item.precio, v_sel.cantidad,
+              v_item.opciones, v_item.nota, v_item.estado, v_item.creado, v_item.impreso)
+      returning id into v_nuevo;
+      v_ids := v_ids || v_nuevo;
+    else
+      v_ids := v_ids || v_item.id;
+    end if;
+    v_valor := v_valor + v_sel.cantidad * v_item.precio;
+  end loop;
+
+  if cardinality(v_ids) = 0 then
+    raise exception 'Elige qué platos se van a pagar';
+  end if;
+  v_cierra := not exists (
+    select 1 from pedido_items where pedido_id = p_pedido and pago_id is null and id <> all (v_ids)
+  );
+  if v_cierra then
+    v_valor := v_valor + v_pedido.envio;
+  end if;
+
+  insert into pagos (pedido_id, metodo, valor) values (p_pedido, p_metodo, v_valor) returning id into v_pago;
+  update pedido_items set pago_id = v_pago where id = any (v_ids);
+  if v_cierra then
+    perform cerrar_cuenta(p_pedido);
+  end if;
+  return jsonb_build_object('pago_id', v_pago, 'valor', v_valor, 'cerrada', v_cierra);
+end $$;
+
+-- Cobra todo lo que falta de la cuenta con un solo método. (La propina ya no se usa.)
+create or replace function public.cobrar(p_pedido uuid, p_metodo text, p_propina integer) returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  v_items jsonb;
+begin
+  perform exigir_rol('admin', 'cajero');
+  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'cantidad', cantidad)), '[]') into v_items
+  from pedido_items where pedido_id = p_pedido and pago_id is null;
+  if v_items = '[]'::jsonb then
+    raise exception 'La cuenta no tiene platos por cobrar';
+  end if;
+  perform cobrar_parte(p_pedido, v_items, p_metodo);
+  return (select total from pedidos where id = p_pedido);
 end $$;
 
 -- Anula una cuenta. Si ya estaba pagada, devuelve al inventario lo que se descontó.
@@ -782,6 +893,7 @@ begin
       'numero_domicilio', p.numero_domicilio,
       'tipo', p.tipo,
       'mesa', m.nombre,
+      'para_llevar', p.para_llevar,
       'cliente', p.cliente,
       'atiende', mi.nombre,
       'enviado', min(t.creado),
@@ -808,6 +920,7 @@ begin
     'mi_empleado()', 'cambiar_entrega(uuid, text)', 'registrar_novedad(uuid, text)', 'registrar_recibido(uuid, integer)',
     'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid)', 'enviar_cocina(uuid)',
     'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text)',
+    'cobrar_parte(uuid, jsonb, text)', 'cambiar_para_llevar(uuid, boolean)',
     'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()',
     'asignar_numero_domicilio()'] loop
     execute format('revoke all on function public.%s from public, anon', f);
@@ -818,6 +931,7 @@ end $$;
 -- Funciones de uso interno: nadie las llama directo, solo otras funciones.
 revoke all on function public.domicilio_para_mi(uuid) from public, anon, authenticated;
 revoke all on function public.solo_mesas_si_domiciliario(uuid) from public, anon, authenticated;
+revoke all on function public.cerrar_cuenta(uuid) from public, anon, authenticated;
 
 -- Actualizaciones en vivo para mesas, cocina y domicilios.
 -- Si una tabla ya estaba activada (por ejemplo, desde el panel de Supabase), se deja como está.

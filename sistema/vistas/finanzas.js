@@ -22,7 +22,9 @@ export async function pintar($vista, ctx) {
   const totalGastos = suma(gastos, (g) => g.valor);
   const nombre = (p) => (p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa" : `Domicilio #${p.numero_domicilio ?? p.numero} · ${p.cliente}`);
 
-  const porMetodo = METODOS.map((m) => [m, suma(pagados.filter((p) => p.metodo_pago === m), (p) => p.total + p.propina)]).filter(([, v]) => v);
+  // Cuentas cobradas por partes: cada pago suma en su método. Las de antes (sin pagos) van completas.
+  const pagos = pagados.flatMap((p) => (p.pagos?.length ? p.pagos : [{ metodo: p.metodo_pago, valor: p.total + p.propina }]));
+  const porMetodo = METODOS.map((m) => [m, suma(pagos.filter((x) => x.metodo === m), (x) => x.valor)]).filter(([, v]) => v);
 
   const platos = new Map();
   for (const item of pagados.flatMap((p) => p.pedido_items)) {

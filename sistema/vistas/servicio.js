@@ -59,7 +59,7 @@ export async function mesas($vista, ctx) {
     return `<button class="mesa ocupada ${listos ? "listo" : ""}" data-mesa="${m.id}">
       <strong>${esc(m.nombre)}</strong>
       <span class="total-mesa">${pesos(totalCuenta(p))}</span>
-      <small>${minutosDesde(p.creado)} min${listos ? " · ¡Platos listos!" : sinEnviar ? " · Sin enviar" : ""}</small>
+      <small>${minutosDesde(p.creado)} min${p.para_llevar ? " · Para llevar" : ""}${listos ? " · ¡Platos listos!" : sinEnviar ? " · Sin enviar" : ""}</small>
     </button>`;
   });
   $vista.innerHTML = `
@@ -232,12 +232,16 @@ export async function cuenta($vista, ctx, pedidoId) {
 
   // El domiciliario ve los domicilios pero no les cambia platos ni los cobra.
   const soloLectura = rol === "domiciliario" && p.tipo === "domicilio";
+  const pagos = [...(p.pagos ?? [])].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const pagado = pagos.reduce((s, x) => s + x.valor, 0);
+  const metodoDe = (pagoId) => pagos.find((x) => x.id === pagoId)?.metodo ?? "";
   const filasItems = items.map((i) => {
-    const puedeQuitar = abierta && !soloLectura && (i.estado === "nuevo" || puedeCobrar(rol));
+    const puedeQuitar = abierta && !soloLectura && !i.pago_id && (i.estado === "nuevo" || puedeCobrar(rol));
     const detalle = [...i.opciones.map((o) => o.nombre), i.nota].filter(Boolean).join(" · ");
     return `<div class="item">
       <div><strong>${i.cantidad}× ${esc(i.nombre)}</strong>${detalle ? `<br><small class="suave">${esc(detalle)}</small>` : ""}
-        <br><small class="etiqueta estado-${i.estado}">${ESTADO_ITEM[i.estado]}</small></div>
+        <br><small class="etiqueta estado-${i.estado}">${ESTADO_ITEM[i.estado]}</small>
+        ${abierta && i.pago_id ? `<small class="etiqueta estado-listo">Pagado · ${esc(metodoDe(i.pago_id))}</small>` : ""}</div>
       <div class="num">${pesos(i.precio * i.cantidad)}
         ${puedeQuitar ? `<br><button class="chico peligro" data-quitar="${i.id}" aria-label="Quitar">Quitar</button>` : ""}</div>
     </div>`;
@@ -270,6 +274,16 @@ export async function cuenta($vista, ctx, pedidoId) {
       </div>` : ""}
     </div>` : "";
 
+  const paraLlevar = p.tipo !== "mesa" ? ""
+    : abierta && !soloLectura ? `<div class="panel"><div class="botones-domicilio" style="justify-content:flex-start;margin:0">
+        <button class="chico ${p.para_llevar ? "" : "principal"}" data-llevar="no">Comer aquí</button>
+        <button class="chico ${p.para_llevar ? "principal" : ""}" data-llevar="si">Para llevar</button></div></div>`
+    : p.para_llevar ? `<p style="margin:0"><span class="etiqueta">Para llevar</span></p>` : "";
+  // Pagos hechos (cuando la cuenta se dividió) y lo que falta.
+  const resumenPagos = pagos.length && (abierta || pagos.length > 1) ? `
+          ${pagos.map((x) => `<div class="item"><span class="suave">Pago ${hora(x.fecha)} · ${esc(x.metodo)}</span><span class="num">${pesos(x.valor)}</span></div>`).join("")}
+          ${abierta ? `<div class="item"><strong>Falta por cobrar</strong><strong class="num">${pesos(totalCuenta(p) - pagado)}</strong></div>` : ""}` : "";
+
   const estadoCerrada = p.estado === "pagado"
     ? `Pagada con ${esc(p.metodo_pago)} a las ${hora(p.cerrado)}${p.propina ? ` · propina ${pesos(p.propina)}` : ""}`
     : `Anulada${p.motivo_anulacion ? `: ${esc(p.motivo_anulacion)}` : ""}`;
@@ -283,17 +297,19 @@ export async function cuenta($vista, ctx, pedidoId) {
       ${abierta && !soloLectura ? `<div class="carta">${carta(ctx.menu)}</div>` : ""}
       <div class="resumen">
         ${domicilio}
+        ${paraLlevar}
         <div class="panel">
           ${items.length ? filasItems : `<p class="vacio">Toca un plato para agregarlo.</p>`}
           ${p.envio ? `<div class="item"><span>Envío</span><span class="num">${pesos(p.envio)}</span></div>` : ""}
           <div class="total"><span>Total</span><span>${pesos(totalMostrado(p))}</span></div>
+          ${resumenPagos}
         </div>
         ${abierta && !soloLectura && items.length ? `<button class="ver-cuenta" id="ver-cuenta">${platosEnCuenta(items)} · Ver cuenta <strong>${pesos(totalMostrado(p))}</strong></button>` : ""}
         ${abierta && !soloLectura ? `<div class="acciones-cuenta">
           ${hay("nuevo") ? `<button class="principal" id="enviar">Enviar a cocina</button>` : ""}
           ${(hay("cocina") || hay("listo")) && !esDomicilio ? `<button id="entregar">Marcar entregado</button>` : ""}
           ${items.length ? `<button id="precuenta">Imprimir cuenta</button>` : ""}
-          ${puedeCobrar(rol) && items.length && !hay("nuevo") ? `<button class="principal" id="cobrar">Cobrar</button>` : ""}
+          ${puedeCobrar(rol) && items.length && !hay("nuevo") ? `<button class="principal" id="cobrar">${pagado ? "Cobrar lo que falta" : "Cobrar"}</button>` : ""}
           ${rol === "admin" ? `<button class="peligro" id="anular">Anular cuenta</button>` : ""}
         </div>` : abierta ? "" : `<div class="acciones-cuenta">
           ${rol !== "domiciliario" ? `<button id="imprimir">Imprimir</button>` : ""}
@@ -321,6 +337,8 @@ export async function cuenta($vista, ctx, pedidoId) {
     // Si la comandera está en este mismo equipo, imprime de una sin esperar el aviso en vivo.
     hecho(api.enviarCocina(p.id).then(() => ctx.imprimirPendientes()), "Enviado a cocina"));
   document.getElementById("entregar")?.addEventListener("click", () => hecho(api.entregarPedido(p.id), "Pedido entregado"));
+  $vista.querySelectorAll("[data-llevar]").forEach(($b) =>
+    $b.addEventListener("click", () => hecho(api.cambiarParaLlevar(p.id, $b.dataset.llevar === "si"))));
   const ticket = () => ticketCuenta(p, ctx.negocio, { mesa: titulo });
   document.getElementById("cobrar")?.addEventListener("click", () => formularioCobro(ctx, p, titulo));
   document.getElementById("precuenta")?.addEventListener("click", () => imprimir(ticket()));
@@ -387,39 +405,79 @@ function elegirPlato(ctx, pedidoId, platoId) {
     { boton: "Agregar", alTerminar: () => ctx.refrescar() });
 }
 
-// Se cobra al final (después de comer o al entregar el domicilio). Lo que la comanda ya llevó a
-// cocina no cambia; si quedó algo sin enviar en un domicilio, la base de datos lo manda a cocina.
+// Se cobra al final (después de comer o al entregar el domicilio). Por defecto se cobra todo lo
+// que falta; si pagan por separado, se deja solo lo que paga esta persona y el resto queda
+// pendiente para el siguiente pago (cada uno con su método). El envío va en el último pago.
 function formularioCobro(ctx, p, titulo) {
-  const total = totalCuenta(p);
+  const pendientes = p.pedido_items.filter((i) => !i.pago_id).sort((a, b) => a.creado.localeCompare(b.creado));
+  const unidades = pendientes.reduce((s, i) => s + i.cantidad, 0);
+  const filas = pendientes.map((i) => {
+    const detalle = [...i.opciones.map((o) => o.nombre), i.nota].filter(Boolean).join(" · ");
+    const cantidades = Array.from({ length: i.cantidad + 1 }, (_, n) => [n, `${n} de ${i.cantidad}`]);
+    return `<div class="item">
+      <div><strong>${esc(i.nombre)}</strong> <small class="suave">${pesos(i.precio)} c/u</small>
+        ${detalle ? `<br><small class="suave">${esc(detalle)}</small>` : ""}</div>
+      <select data-paga="${i.id}" data-precio="${i.precio}" aria-label="Cuántos paga" style="width:auto">${opciones(cantidades, i.cantidad)}</select>
+    </div>`;
+  }).join("");
+  let resultado = null;
   let cobro = null;
-  const $form = formulario(`Cobrar ${pesos(total)}`, `
+  const $form = formulario(`Cobrar · ${esc(titulo)}`, `
+    <p class="suave" style="margin:0">¿Pagan por separado? Deja aquí solo lo que paga esta persona; lo demás queda para el siguiente pago.</p>
+    <div>${filas}</div>
     <label>Método de pago<select name="metodo">${opciones(METODOS)}</select></label>
     <label>Recibido (efectivo)<input name="recibido" type="number" min="0" step="100" value="${p.recibido ?? ""}"></label>
-    <div class="total"><span>Total a recibir</span><span>${pesos(total)}</span></div>
+    <div class="total"><span>Total de este pago</span><span id="a-cobrar"></span></div>
     <p class="suave" id="cambio" style="margin:0"></p>
     <label class="opcion"><input type="checkbox" name="imprimir"${preferencia("cuenta") ? " checked" : ""}> Imprimir la cuenta</label>`,
-    async (c) => {
-      await api.cobrar(p.id, c.metodo);
+    async (c, $f) => {
+      const items = [...$f.querySelectorAll("[data-paga]")]
+        .map(($s) => ({ id: $s.dataset.paga, cantidad: Number($s.value) }))
+        .filter((x) => x.cantidad > 0);
+      if (!items.length) throw new Error("Elige qué platos se van a pagar");
+      resultado = await api.cobrarParte(p.id, items, c.metodo);
       cobro = c;
     },
     {
       boton: "Confirmar pago",
       alTerminar: async () => {
         guardarPreferencia("cuenta", Boolean(cobro.imprimir));
-        aviso("Cuenta cobrada");
         if (p.tipo === "domicilio") ctx.imprimirPendientes();
         if (cobro.imprimir) {
-          // Se imprime la cuenta ya cerrada, tal como quedó guardada (total y método).
-          const cerrada = await api.pedido(p.id);
-          await imprimir(ticketCuenta(cerrada, ctx.negocio, { mesa: titulo, recibido: Number(cobro.recibido) || 0 }));
+          // Ticket de este pago: solo los platos que se pagaron, con su método.
+          const actual = await api.pedido(p.id);
+          await imprimir(ticketCuenta({
+            ...actual,
+            pedido_items: actual.pedido_items.filter((i) => i.pago_id === resultado.pago_id),
+            envio: resultado.cerrada ? actual.envio : 0,
+            estado: "pagado",
+            metodo_pago: cobro.metodo,
+            cerrado: actual.cerrado ?? new Date().toISOString(),
+          }, ctx.negocio, { mesa: titulo, recibido: Number(cobro.recibido) || 0 }));
         }
-        ctx.ir(p.tipo === "mesa" ? "mesas" : "domicilios");
+        if (resultado.cerrada) {
+          aviso("Cuenta cobrada");
+          ctx.ir(p.tipo === "mesa" ? "mesas" : "domicilios");
+        } else {
+          aviso(`Pago de ${pesos(resultado.valor)} registrado. Falta cobrar el resto.`);
+          ctx.refrescar();
+        }
       },
     });
   const actualizar = () => {
+    let total = 0;
+    let elegidas = 0;
+    $form.querySelectorAll("[data-paga]").forEach(($s) => {
+      total += Number($s.value) * Number($s.dataset.precio);
+      elegidas += Number($s.value);
+    });
+    // Si este pago se lleva todo lo que falta, incluye el envío.
+    if (elegidas === unidades) total += p.envio || 0;
+    $form.querySelector("#a-cobrar").textContent = pesos(total);
     const recibido = Number($form.recibido.value) || 0;
     $form.querySelector("#cambio").textContent = recibido ? `Cambio: ${pesos(recibido - total)}` : "";
   };
   $form.addEventListener("input", actualizar);
+  $form.addEventListener("change", actualizar);
   actualizar();
 }

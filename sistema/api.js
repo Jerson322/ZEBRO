@@ -101,14 +101,14 @@ export const pedidosEnCocina = () =>
   resultado(sb.from("pedidos").select("*, pedido_items(*)")
     .or("estado.eq.abierto,and(tipo.eq.domicilio,estado.eq.pagado,entrega.eq.preparando)").order("creado"));
 
-export const pedido = (id) => resultado(sb.from("pedidos").select("*, pedido_items(*)").eq("id", id).maybeSingle());
+export const pedido = (id) => resultado(sb.from("pedidos").select("*, pedido_items(*), pagos(*)").eq("id", id).maybeSingle());
 
 // Cuentas cerradas (pagadas o anuladas) entre dos fechas, ambas incluidas.
 export function pedidosCerrados(desde, hasta) {
   const inicio = new Date(`${desde}T00:00:00`).toISOString();
   const fin = new Date(new Date(`${hasta}T00:00:00`).getTime() + 86400000).toISOString();
   return resultado(
-    sb.from("pedidos").select("*, pedido_items(*)").neq("estado", "abierto")
+    sb.from("pedidos").select("*, pedido_items(*), pagos(*)").neq("estado", "abierto")
       .gte("cerrado", inicio).lt("cerrado", fin).order("cerrado", { ascending: false })
   );
 }
@@ -166,6 +166,11 @@ export const marcarItems = (pedidoId, de, a) => rpc("marcar_items", { p_pedido: 
 export const entregarPedido = (pedidoId) => rpc("entregar_pedido", { p_pedido: pedidoId });
 // Ya no se cobra propina: siempre va en 0.
 export const cobrar = (pedidoId, metodo) => rpc("cobrar", { p_pedido: pedidoId, p_metodo: metodo, p_propina: 0 });
+// Cobra una parte de la cuenta: items = [{ id, cantidad }]. Devuelve { pago_id, valor, cerrada }.
+export const cobrarParte = (pedidoId, items, metodo) =>
+  rpc("cobrar_parte", { p_pedido: pedidoId, p_items: items, p_metodo: metodo });
+export const cambiarParaLlevar = (pedidoId, paraLlevar) =>
+  rpc("cambiar_para_llevar", { p_pedido: pedidoId, p_para_llevar: paraLlevar });
 export const anular = (pedidoId, motivo) => rpc("anular", { p_pedido: pedidoId, p_motivo: motivo });
 export const moverInsumo = (insumoId, tipo, cantidad, costo, motivo) =>
   rpc("mover_insumo", {
