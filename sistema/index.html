@@ -279,6 +279,34 @@
     dialog h2 { margin: 0; font-size: 20px; font-weight: 800; }
     dialog .botones { margin-top: 4px; }
     dialog .botones button { min-width: 120px; }
+
+    /* Multicuenta: repartir los productos entre varias cuentas arrastrándolos */
+    @media (min-width: 761px) { dialog.ancho { width: min(1100px, calc(100vw - 32px)); } }
+    .mc-cabeza { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .mc-zona { border: 2px dashed var(--borde); border-radius: var(--radio); padding: 12px; transition: border-color 0.15s, background 0.15s; }
+    .mc-zona.encima { border-color: var(--acento); background: var(--acento-suave); }
+    .mc-sin { background: var(--fondo); }
+    .mc-cuentas { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+    .mc-cuenta { border-style: solid; display: flex; flex-direction: column; gap: 8px; background: var(--panel); }
+    .mc-titulo { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; }
+    .mc-fichas { display: flex; flex-wrap: wrap; gap: 6px; min-height: 46px; align-content: flex-start; }
+    .mc-ficha {
+      touch-action: none; user-select: none; cursor: grab; min-height: 0; padding: 8px 12px; border-radius: 999px;
+      border: 1px solid var(--borde); background: var(--panel); font-weight: 600; font-size: 14px; box-shadow: var(--sombra);
+    }
+    .mc-ficha small { color: var(--suave); font-weight: 400; margin-left: 4px; }
+    .mc-ficha.elegida { border-color: var(--acento); background: var(--acento-suave); color: var(--acento-oscuro); }
+    .mc-ficha.arrastrando { opacity: 0.35; }
+    .mc-fantasma { position: fixed; pointer-events: none; z-index: 10; margin: 0; transform: translate(-50%, -50%) rotate(-3deg); box-shadow: var(--sombra-alta); }
+    .mc-vacia { margin: auto; color: var(--suave); font-size: 13px; text-align: center; }
+    .mc-total { display: flex; justify-content: space-between; align-items: baseline; font-size: 15px; }
+    .mc-total strong { font-size: 20px; }
+    .mc-nueva {
+      border: 2px dashed var(--borde); border-radius: var(--radio); background: transparent; color: var(--suave);
+      min-height: 170px; font-size: 15px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    }
+    .mc-nueva span { font-size: 34px; line-height: 1; }
+    .mc-nueva:hover { border-color: var(--acento); color: var(--acento-oscuro); background: var(--acento-suave); }
     #aviso {
       position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
       background: var(--texto); color: #fff; padding: 12px 18px; border-radius: 14px; z-index: 20;

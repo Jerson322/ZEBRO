@@ -82,7 +82,7 @@ export function formulario(titulo, campos, guardar, { boton = "Guardar", alTermi
       $enviar.disabled = false;
     }
   });
-  $d.showModal();
+  if (!$d.open) $d.showModal();
   return $form;
 }
 
@@ -90,7 +90,8 @@ export function formulario(titulo, campos, guardar, { boton = "Guardar", alTermi
 export function mostrar(html) {
   const $d = $dialogo();
   $d.innerHTML = `<div class="contenido">${html}</div>`;
-  $d.showModal();
+  // Si ya está abierta (por ejemplo, se vuelve a pintar), solo se cambia el contenido.
+  if (!$d.open) $d.showModal();
   return $d.firstElementChild;
 }
 
