@@ -33,6 +33,8 @@ export function imprimir(html) {
     const $zona = document.getElementById("impresion");
     $zona.innerHTML = html;
     document.body.classList.add("imprimiendo");
+    // Espera a que carguen las imágenes (el logo) para que no salga en blanco.
+    await Promise.all([...$zona.querySelectorAll("img")].map((img) => img.decode().catch(() => {})));
     await new Promise((listo) => requestAnimationFrame(() => requestAnimationFrame(listo)));
     window.print();
     document.body.classList.remove("imprimiendo");
@@ -70,6 +72,7 @@ export function ticketCuenta(p, negocio, { mesa, recibido } = {}) {
   const cambio = recibido ? recibido - total - (p.propina || 0) : 0;
   const fila = (izq, der, clase = "") => `<div class="t-fila ${clase}"><span>${izq}</span><span>${der}</span></div>`;
   return `<div class="ticket">
+    ${negocio?.logo ? `<div class="t-centro"><img class="t-logo" src="${esc(negocio.logo)}" alt=""></div>` : ""}
     <div class="t-centro t-negocio">${esc(negocio?.nombre ?? "")}</div>
     ${negocio?.nit ? `<div class="t-centro">NIT ${esc(negocio.nit)}</div>` : ""}
     ${negocio?.direccion ? `<div class="t-centro">${esc(negocio.direccion)}</div>` : ""}
