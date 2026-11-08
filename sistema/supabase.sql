@@ -876,6 +876,42 @@ drop policy if exists "admin cambia" on public.negocio;
 create policy "admin cambia" on public.negocio for update to authenticated
   using (rol_actual() = 'admin') with check (rol_actual() = 'admin');
 
+-- Cola de impresión: lo que se imprime desde un celular (cuentas, tickets de pago, cierre de caja)
+-- se guarda aquí y lo imprime el computador que tiene «Comandera aquí».
+create table if not exists public.impresiones (
+  id uuid primary key default gen_random_uuid(),
+  html text not null check (length(html) <= 1000000),
+  creado timestamptz not null default now(),
+  creado_por uuid default auth.uid(),
+  impreso timestamptz
+);
+alter table public.impresiones enable row level security;
+revoke all on public.impresiones from anon;
+grant select, insert on public.impresiones to authenticated;
+grant all on public.impresiones to service_role;
+drop policy if exists "equipo envía" on public.impresiones;
+create policy "equipo envía" on public.impresiones for insert to authenticated
+  with check (rol_actual() is not null and creado_por = auth.uid());
+-- Solo para que la comandera reciba el aviso en vivo; el contenido se toma con la función de abajo.
+drop policy if exists "equipo lee" on public.impresiones;
+create policy "equipo lee" on public.impresiones for select to authenticated using (rol_actual() is not null);
+
+-- Entrega lo que falta por imprimir y lo marca como impreso en el mismo paso (si dos equipos
+-- tienen la comandera, cada ticket le sale a uno solo). Borra lo impreso hace más de 2 días.
+create or replace function public.impresiones_por_imprimir() returns setof text
+language plpgsql security definer set search_path = public as $$
+begin
+  perform exigir_rol('admin', 'cajero', 'mesero', 'cocina', 'domiciliario');
+  delete from impresiones where impreso < now() - interval '2 days';
+  return query
+    with tomadas as (
+      update impresiones set impreso = now()
+      where id in (select id from impresiones where impreso is null order by creado for update skip locked)
+      returning html, creado
+    )
+    select html from tomadas order by creado;
+end $$;
+
 -- Entrega las comandas que faltan por imprimir y las marca como impresas en el mismo paso.
 -- Si dos equipos imprimen a la vez, cada plato le sale a uno solo.
 create or replace function public.comandas_por_imprimir() returns jsonb
@@ -925,7 +961,7 @@ begin
     'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid)', 'enviar_cocina(uuid)',
     'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text)',
     'cobrar_parte(uuid, jsonb, text)', 'cambiar_para_llevar(uuid, boolean)',
-    'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()',
+    'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()', 'impresiones_por_imprimir()',
     'asignar_numero_domicilio()'] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);
@@ -944,7 +980,7 @@ declare
   t text;
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    foreach t in array array['pedidos', 'pedido_items'] loop
+    foreach t in array array['pedidos', 'pedido_items', 'impresiones'] loop
       begin
         execute format('alter publication supabase_realtime add table public.%I', t);
       exception when duplicate_object then

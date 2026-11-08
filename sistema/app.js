@@ -8,7 +8,7 @@ import * as inventario from "./vistas/inventario.js";
 import * as finanzas from "./vistas/finanzas.js";
 import * as equipo from "./vistas/equipo.js";
 import * as ajustes from "./vistas/ajustes.js";
-import { preferencia, guardarPreferencia, imprimir, ticketComanda } from "./impresion.js";
+import { preferencia, guardarPreferencia, imprimirAqui, ticketComanda } from "./impresion.js";
 import { iconos } from "./iconos.js";
 import { abrirCierre } from "./cierre.js";
 
@@ -58,7 +58,9 @@ async function imprimirComandasPendientes() {
   if (!ctx.perfil || !preferencia("comandas") || buscandoComandas) return;
   buscandoComandas = true;
   try {
-    for (const comanda of await api.comandasPorImprimir()) await imprimir(ticketComanda(comanda));
+    for (const comanda of await api.comandasPorImprimir()) await imprimirAqui(ticketComanda(comanda));
+    // Cuentas, tickets de pago y cierres enviados desde los celulares.
+    for (const html of await api.impresionesPorImprimir()) await imprimirAqui(html);
   } catch {
     // Sin conexión: se vuelve a intentar en la próxima revisión.
   } finally {

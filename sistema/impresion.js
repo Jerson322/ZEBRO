@@ -1,7 +1,8 @@
 // Tickets para la comandera (80 mm) y preferencias de impresión de este equipo.
 // Para imprimir sin la ventana de "Imprimir", Chrome se abre con --kiosk-printing y la comandera
-// como impresora predeterminada de Windows (ver la sección Ajustes).
-import { esc, pesos } from "./util.js";
+// como impresora predeterminada de Windows. Desde un celular, el ticket se envía a la comandera.
+import * as api from "./api.js";
+import { esc, pesos, aviso } from "./util.js";
 
 const PREFERENCIAS = {
   comandas: "zebro-imprimir-comandas",
@@ -27,8 +28,20 @@ export function guardarPreferencia(nombre, activa) {
 
 let cola = Promise.resolve();
 
-// Imprime un ticket. Los tickets se imprimen uno detrás de otro, nunca a la vez.
-export function imprimir(html) {
+// Imprime un ticket donde corresponde: si este equipo tiene «Comandera aquí», sale aquí mismo;
+// si no (por ejemplo, un celular), se envía a la cola y lo imprime el computador de la comandera.
+export async function imprimir(html) {
+  if (preferencia("comandas")) return imprimirAqui(html);
+  try {
+    await api.enviarAImpresora(html);
+    aviso("Enviado a la comandera");
+  } catch (error) {
+    aviso(`No se pudo enviar a la comandera: ${error.message}`);
+  }
+}
+
+// Imprime un ticket en este equipo. Los tickets se imprimen uno detrás de otro, nunca a la vez.
+export function imprimirAqui(html) {
   cola = cola.then(async () => {
     const $zona = document.getElementById("impresion");
     $zona.innerHTML = html;

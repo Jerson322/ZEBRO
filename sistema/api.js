@@ -52,6 +52,9 @@ export async function miPerfil(usuarioId) {
 export const negocio = () => resultado(sb.from("negocio").select("*").eq("id", 1).maybeSingle());
 export const guardarNegocio = (datos) => resultado(sb.from("negocio").update(datos).eq("id", 1));
 export const comandasPorImprimir = () => rpc("comandas_por_imprimir");
+// Cola de impresión: un ticket enviado desde un equipo sin impresora, para que lo imprima la comandera.
+export const enviarAImpresora = (html) => resultado(sb.from("impresiones").insert({ html }));
+export const impresionesPorImprimir = () => rpc("impresiones_por_imprimir");
 
 export const reclamarAdmin = (nombre) => resultado(sb.rpc("reclamar_admin", { p_nombre: nombre }));
 
@@ -198,6 +201,7 @@ export function escucharPedidos(alCambiar) {
     .channel("servicio")
     .on("postgres_changes", { event: "*", schema: "public", table: "pedidos" }, alCambiar)
     .on("postgres_changes", { event: "*", schema: "public", table: "pedido_items" }, alCambiar)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "impresiones" }, alCambiar)
     .subscribe();
   return () => sb.removeChannel(canal);
 }
