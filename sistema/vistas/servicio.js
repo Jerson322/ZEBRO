@@ -1,6 +1,7 @@
 // Servicio: mapa de mesas, domicilios y la cuenta de cada uno (tomar pedido, cocina, cobro).
 import * as api from "../api.js";
 import { esc, pesos, opciones, formulario, mostrar, cerrarDialogo, hora, minutosDesde, aviso } from "../util.js";
+import { preferencia, guardarPreferencia, imprimir, ticketCuenta } from "../impresion.js";
 
 const METODOS = ["Efectivo", "Tarjeta", "Transferencia", "Nequi", "Daviplata"];
 const PROPINA_SUGERIDA = 0.1;
@@ -185,6 +186,7 @@ export async function cuenta($vista, ctx, pedidoId) {
         ${abierta ? `<div class="acciones-cuenta">
           ${hay("nuevo") ? `<button class="principal" id="enviar">Enviar a cocina</button>` : ""}
           ${hay("listo") && rol !== "cocina" ? `<button id="entregar">Marcar entregados</button>` : ""}
+          ${items.length ? `<button id="precuenta">Imprimir cuenta</button>` : ""}
           ${puedeCobrar(rol) && items.length ? `<button class="principal" id="cobrar">Cobrar</button>` : ""}
           ${rol === "admin" ? `<button class="peligro" id="anular">Anular cuenta</button>` : ""}
         </div>` : `<div class="acciones-cuenta">
@@ -211,8 +213,10 @@ export async function cuenta($vista, ctx, pedidoId) {
   );
   document.getElementById("enviar")?.addEventListener("click", () => hecho(api.enviarCocina(p.id), "Enviado a cocina"));
   document.getElementById("entregar")?.addEventListener("click", () => hecho(api.marcarItems(p.id, "listo", "entregado")));
-  document.getElementById("cobrar")?.addEventListener("click", () => formularioCobro(ctx, p));
-  document.getElementById("imprimir")?.addEventListener("click", () => window.print());
+  const ticket = () => ticketCuenta(p, ctx.negocio, { mesa: titulo });
+  document.getElementById("cobrar")?.addEventListener("click", () => formularioCobro(ctx, p, titulo));
+  document.getElementById("precuenta")?.addEventListener("click", () => imprimir(ticket()));
+  document.getElementById("imprimir")?.addEventListener("click", () => imprimir(ticket()));
   document.getElementById("anular")?.addEventListener("click", () => {
     const motivo = prompt("¿Por qué se anula? (Si ya estaba pagada, el inventario se devuelve)");
     if (motivo === null) return;
@@ -270,8 +274,9 @@ function elegirPlato(ctx, pedidoId, platoId) {
     { boton: "Agregar", alTerminar: () => ctx.refrescar() });
 }
 
-function formularioCobro(ctx, p) {
+function formularioCobro(ctx, p, titulo) {
   const total = totalCuenta(p);
+  let cobro = null;
   const $form = formulario(`Cobrar ${pesos(total)}`, `
     <label>Método de pago<select name="metodo">${opciones(METODOS)}</select></label>
     <div class="fila">
@@ -280,9 +285,25 @@ function formularioCobro(ctx, p) {
     </div>
     <button type="button" id="sugerida">Agregar propina sugerida (${PROPINA_SUGERIDA * 100}%)</button>
     <div class="total"><span>Total a recibir</span><span id="a-recibir">${pesos(total)}</span></div>
-    <p class="suave" id="cambio" style="margin:0"></p>`,
-    (c) => api.cobrar(p.id, c.metodo, c.propina),
-    { boton: "Confirmar pago", alTerminar: () => { aviso("Cuenta cobrada"); ctx.ir(p.tipo === "mesa" ? "mesas" : "domicilios"); } });
+    <p class="suave" id="cambio" style="margin:0"></p>
+    <label class="opcion"><input type="checkbox" name="imprimir"${preferencia("cuenta") ? " checked" : ""}> Imprimir la cuenta</label>`,
+    async (c) => {
+      await api.cobrar(p.id, c.metodo, c.propina);
+      cobro = c;
+    },
+    {
+      boton: "Confirmar pago",
+      alTerminar: async () => {
+        guardarPreferencia("cuenta", Boolean(cobro.imprimir));
+        aviso("Cuenta cobrada");
+        if (cobro.imprimir) {
+          // Se imprime la cuenta ya cerrada, tal como quedó guardada (total, propina y método).
+          const cerrada = await api.pedido(p.id);
+          await imprimir(ticketCuenta(cerrada, ctx.negocio, { mesa: titulo, recibido: Number(cobro.recibido) || 0 }));
+        }
+        ctx.ir(p.tipo === "mesa" ? "mesas" : "domicilios");
+      },
+    });
   const actualizar = () => {
     const propina = Number($form.propina.value) || 0;
     const recibido = Number($form.recibido.value) || 0;

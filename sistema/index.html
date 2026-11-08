@@ -201,12 +201,34 @@
       main { padding: 16px; }
       .mesas, .platos { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
     }
+    .botones-comanda { display: flex; gap: 8px; }
+    .botones-comanda button { flex: 1; }
+    label.interruptor { margin-bottom: 12px; }
+    .guia ol { padding-left: 20px; line-height: 1.5; }
+    .guia li { margin-bottom: 8px; }
+    .guia pre { white-space: pre-wrap; word-break: break-all; background: var(--fondo); padding: 8px; border-radius: 8px; font-size: 13px; }
+    .formulario-plano { display: flex; flex-direction: column; gap: 12px; }
+
+    /* Tickets de 80 mm: solo existen al imprimir */
+    #impresion { display: none; }
     @media print {
-      nav, .carta, .acciones-cuenta, a.volver, #aviso { display: none !important; }
-      main { padding: 0; }
-      .cuenta { display: block; }
-      .panel { border: 0; }
+      @page { margin: 0; }
+      body.imprimiendo > *:not(#impresion) { display: none !important; }
+      body.imprimiendo #impresion { display: block; }
+      body.imprimiendo { background: #fff; }
     }
+    .ticket { width: 72mm; padding: 2mm 3mm 6mm; font-family: "Courier New", monospace; font-size: 12pt; color: #000; line-height: 1.25; }
+    .ticket hr { border: 0; border-top: 1px dashed #000; margin: 2mm 0; }
+    .t-centro { text-align: center; }
+    .t-negocio { font-size: 15pt; font-weight: 700; }
+    .t-chico { font-size: 9pt; }
+    .t-fila { display: flex; justify-content: space-between; gap: 2mm; }
+    .t-total { font-size: 15pt; font-weight: 700; }
+    .t-detalle { padding-left: 4mm; font-size: 11pt; }
+    .comanda-ticket { font-size: 14pt; font-weight: 700; }
+    .comanda-ticket .t-grande { font-size: 22pt; }
+    .comanda-ticket .t-plato { font-size: 16pt; margin-top: 2mm; }
+    .comanda-ticket .t-detalle { font-size: 13pt; }
   </style>
 </head>
 <body>
@@ -216,6 +238,7 @@
   </div>
   <dialog id="dialogo"></dialog>
   <div id="aviso" role="status" hidden></div>
+  <div id="impresion"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"
     integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" crossorigin="anonymous"></script>
   <script type="module" src="/sistema/app.js"></script>

@@ -7,6 +7,8 @@ import * as menu from "./vistas/menu.js";
 import * as inventario from "./vistas/inventario.js";
 import * as finanzas from "./vistas/finanzas.js";
 import * as equipo from "./vistas/equipo.js";
+import * as ajustes from "./vistas/ajustes.js";
+import { preferencia, imprimir, ticketComanda } from "./impresion.js";
 
 const SECCIONES = [
   { id: "mesas", nombre: "Mesas", vista: servicio.mesas, roles: ["admin", "cajero", "mesero"], enVivo: true },
@@ -16,7 +18,10 @@ const SECCIONES = [
   { id: "inventario", nombre: "Inventario", vista: inventario.pintar, roles: ["admin"] },
   { id: "finanzas", nombre: "Ventas y gastos", vista: finanzas.pintar, roles: ["admin", "cajero"] },
   { id: "equipo", nombre: "Empleados", vista: equipo.pintar, roles: ["admin"] },
+  { id: "ajustes", nombre: "Ajustes", vista: ajustes.pintar, roles: ["admin"] },
 ];
+const IMPRIMEN_COMANDAS = ["admin", "cajero", "cocina"];
+const REVISAR_COMANDAS_CADA_MS = 15000;
 // Pantalla de una cuenta (mesa o domicilio): no aparece en el menú.
 const CUENTA = { id: "pedido", vista: servicio.cuenta, roles: ["admin", "cajero", "mesero"], enVivo: true };
 
@@ -26,6 +31,7 @@ const $menu = document.getElementById("menu");
 const ctx = {
   perfil: null,
   menu: null,
+  negocio: null,
   async recargarMenu() {
     ctx.menu = await api.cargarMenu();
   },
@@ -34,11 +40,27 @@ const ctx = {
     else location.hash = destino;
   },
   refrescar: () => pintar(),
+  imprimirPendientes: () => imprimirComandasPendientes(),
 };
 
 let dejarDeEscuchar = null;
 let refrescoPendiente = false;
 let temporizadorEnVivo = null;
+let revisarComandas = null;
+let buscandoComandas = false;
+
+// Si este equipo tiene la comandera, imprime lo que se envió a cocina y aún no se ha impreso.
+async function imprimirComandasPendientes() {
+  if (!ctx.perfil || !IMPRIMEN_COMANDAS.includes(ctx.perfil.rol) || !preferencia("comandas") || buscandoComandas) return;
+  buscandoComandas = true;
+  try {
+    for (const comanda of await api.comandasPorImprimir()) await imprimir(ticketComanda(comanda));
+  } catch {
+    // Sin conexión: se vuelve a intentar en la próxima revisión.
+  } finally {
+    buscandoComandas = false;
+  }
+}
 
 function seccionesPermitidas() {
   return SECCIONES.filter((s) => s.roles.includes(ctx.perfil.rol));
@@ -60,6 +82,7 @@ function pintar() {
 }
 
 async function pintarAhora() {
+  if (!ctx.perfil) return; // quedó pendiente de antes de cerrar sesión
   const { seccion, param } = rutaActual();
   $menu.hidden = false;
   $menu.innerHTML =
@@ -82,6 +105,8 @@ async function pintarAhora() {
 // Llega un cambio de otro dispositivo: se vuelve a pintar la pantalla si muestra pedidos.
 // Si hay un formulario abierto se espera a que lo cierres, para no borrar lo que escribes.
 function alCambiarEnVivo() {
+  if (!ctx.perfil) return; // llegó justo después de cerrar sesión
+  imprimirComandasPendientes();
   if (!rutaActual().seccion.enVivo) return;
   clearTimeout(temporizadorEnVivo);
   temporizadorEnVivo = setTimeout(() => {
@@ -164,8 +189,13 @@ async function entrar() {
     ctx.perfil = await api.miPerfil(usuario.id);
     if (!ctx.perfil || !ctx.perfil.activo) return pantallaSinRol();
     await ctx.recargarMenu();
+    ctx.negocio = await api.negocio();
     dejarDeEscuchar?.();
     dejarDeEscuchar = api.escucharPedidos(alCambiarEnVivo);
+    // Respaldo por si se pierde algún aviso en vivo (por ejemplo, tras un corte de internet).
+    clearInterval(revisarComandas);
+    revisarComandas = setInterval(imprimirComandasPendientes, REVISAR_COMANDAS_CADA_MS);
+    imprimirComandasPendientes();
     await pintar();
   } catch (error) {
     pantallaError(error.message || "No pudimos cargar el sistema. Revisa tu conexión.");
@@ -175,6 +205,8 @@ async function entrar() {
 async function salir() {
   dejarDeEscuchar?.();
   dejarDeEscuchar = null;
+  clearInterval(revisarComandas);
+  clearTimeout(temporizadorEnVivo);
   await api.cerrarSesion();
   ctx.perfil = null;
   // El siguiente usuario empieza en su pantalla principal, no en la del anterior.

@@ -49,6 +49,10 @@ export async function miPerfil(usuarioId) {
   return resultado(sb.from("miembros").select("*").eq("user_id", usuarioId).maybeSingle());
 }
 
+export const negocio = () => resultado(sb.from("negocio").select("*").eq("id", 1).maybeSingle());
+export const guardarNegocio = (datos) => resultado(sb.from("negocio").update(datos).eq("id", 1));
+export const comandasPorImprimir = () => rpc("comandas_por_imprimir");
+
 export const reclamarAdmin = (nombre) => resultado(sb.rpc("reclamar_admin", { p_nombre: nombre }));
 
 // Lecturas

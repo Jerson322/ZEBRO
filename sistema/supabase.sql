@@ -173,6 +173,20 @@ create table if not exists public.pedido_items (
 
 create index if not exists items_por_pedido on public.pedido_items (pedido_id);
 
+-- Cuándo se imprimió la comanda de cada plato (null = falta imprimir).
+alter table public.pedido_items add column if not exists impreso timestamptz;
+
+-- Datos del negocio para los tickets. Siempre una sola fila.
+create table if not exists public.negocio (
+  id integer primary key default 1 check (id = 1),
+  nombre text not null default 'Mi restaurante',
+  nit text not null default '',
+  direccion text not null default '',
+  telefono text not null default '',
+  pie text not null default '¡Gracias por tu visita!'
+);
+insert into public.negocio (id) values (1) on conflict (id) do nothing;
+
 create table if not exists public.gastos (
   id uuid primary key default gen_random_uuid(),
   fecha date not null default current_date,
@@ -189,7 +203,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['miembros', 'categorias', 'platos', 'insumos', 'recetas', 'grupos_mod', 'opciones_mod',
+  foreach t in array array['miembros', 'negocio', 'categorias', 'platos', 'insumos', 'recetas', 'grupos_mod', 'opciones_mod',
     'plato_grupos', 'movimientos', 'mesas', 'empleados', 'pedidos', 'pedido_items', 'gastos'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon', t);
@@ -537,6 +551,50 @@ begin
   from insumos where id = p_insumo;
 end $$;
 
+-- Datos del negocio: todo el equipo los lee (salen en los tickets); solo el administrador los cambia.
+drop policy if exists "equipo lee" on public.negocio;
+create policy "equipo lee" on public.negocio for select to authenticated using (rol_actual() is not null);
+grant update on public.negocio to authenticated;
+drop policy if exists "admin cambia" on public.negocio;
+create policy "admin cambia" on public.negocio for update to authenticated
+  using (rol_actual() = 'admin') with check (rol_actual() = 'admin');
+
+-- Entrega las comandas que faltan por imprimir y las marca como impresas en el mismo paso.
+-- Si dos equipos imprimen a la vez, cada plato le sale a uno solo.
+create or replace function public.comandas_por_imprimir() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_resultado jsonb;
+begin
+  perform exigir_rol('admin', 'cajero', 'cocina');
+  with tomados as (
+    update pedido_items set impreso = now()
+    where estado = 'cocina' and impreso is null
+    returning *
+  )
+  select coalesce(jsonb_agg(c order by c ->> 'enviado'), '[]') into v_resultado
+  from (
+    select jsonb_build_object(
+      'pedido_id', p.id,
+      'numero', p.numero,
+      'tipo', p.tipo,
+      'mesa', m.nombre,
+      'cliente', p.cliente,
+      'atiende', mi.nombre,
+      'enviado', min(t.creado),
+      'items', jsonb_agg(jsonb_build_object(
+        'nombre', t.nombre, 'cantidad', t.cantidad, 'opciones', t.opciones, 'nota', t.nota
+      ) order by t.creado)
+    ) as c
+    from tomados t
+    join pedidos p on p.id = t.pedido_id
+    left join mesas m on m.id = p.mesa_id
+    left join miembros mi on mi.user_id = p.abierto_por
+    group by p.id, m.nombre, mi.nombre
+  ) as comandas;
+  return v_resultado;
+end $$;
+
 -- Las funciones solo las puede llamar alguien con sesión; cada una revisa además el rol.
 do $$
 declare
@@ -546,7 +604,7 @@ begin
     'abrir_mesa(uuid)', 'crear_domicilio(text, text, text, integer, uuid, text)', 'actualizar_domicilio(uuid, text, uuid)',
     'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid)', 'enviar_cocina(uuid)',
     'marcar_items(uuid, text, text)', 'cobrar(uuid, text, integer)', 'anular(uuid, text)',
-    'mover_insumo(uuid, text, numeric, numeric, text)'] loop
+    'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()'] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);
   end loop;
