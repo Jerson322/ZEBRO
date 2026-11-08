@@ -6,7 +6,7 @@ const EXCELJS = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"
 const COLOR = { oscuro: "FF14161F", acento: "FFFF5A1F", acentoSuave: "FFFFF1EB", cebra: "FFF5F6FA", borde: "FFE8E9EF", suave: "FF6B7080" };
 const FORMATO = { d: '"$"#,##0', n: "#,##0", p: "0.0%", fecha: "dd/mm/yyyy", hora: "h:mm AM/PM", min: '0" min"' };
 
-function cargarExcelJS() {
+export function cargarExcelJS() {
   if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
   return new Promise((listo, fallo) => {
     const $s = document.createElement("script");

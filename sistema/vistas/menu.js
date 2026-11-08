@@ -1,6 +1,7 @@
 // Menú y recetas (solo administrador): platos, costo por receta, categorías y modificadores.
 import * as api from "../api.js";
 import { esc, pesos, numero, opciones, tabla, formulario, aviso } from "../util.js";
+import { descargarMenu, subirMenu } from "../menu-excel.js";
 
 let pestana = "platos";
 
@@ -62,12 +63,29 @@ export async function pintar($vista, ctx) {
 
   const botonNuevo = { platos: "Nuevo plato", modificadores: "Nuevo grupo" }[pestana];
   $vista.innerHTML = `
-    <div class="encabezado"><h1>Menú y recetas</h1>${botonNuevo ? `<button class="principal" id="nuevo">${botonNuevo}</button>` : ""}</div>
+    <div class="encabezado"><h1>Menú y recetas</h1>
+      <div class="botones-domicilio" style="margin:0">
+        <button id="descargar-menu">Descargar menú en Excel</button>
+        <button id="subir-menu">Subir menú desde Excel</button>
+        ${botonNuevo ? `<button class="principal" id="nuevo">${botonNuevo}</button>` : ""}</div></div>
     <div class="pestanas">
       ${[["platos", "Platos"], ["categorias", "Categorías"], ["modificadores", "Modificadores"]]
         .map(([id, n]) => `<button data-pestana="${id}" class="${id === pestana ? "activo" : ""}">${n}</button>`).join("")}
     </div>
     <div class="panel">${vistas[pestana]()}</div>`;
+
+  $vista.querySelector("#descargar-menu").addEventListener("click", async (evento) => {
+    const $b = evento.currentTarget;
+    $b.disabled = true;
+    try {
+      await descargarMenu(ctx.menu, ctx.negocio);
+    } catch {
+      aviso("No se pudo crear el Excel. Revisa tu conexión.");
+    } finally {
+      $b.disabled = false;
+    }
+  });
+  $vista.querySelector("#subir-menu").addEventListener("click", () => subirMenu(ctx, recargar));
 
   const $ = (sel) => $vista.querySelectorAll(sel);
   const accion = (sel, fn) => $(sel).forEach(($el) => $el.addEventListener("click", () => fn($el)));
