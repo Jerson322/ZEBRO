@@ -81,8 +81,11 @@ export async function pintar($vista, ctx) {
     $b.disabled = true;
     $b.textContent = "Preparando…";
     try {
+      // Nombres del equipo: domiciliarios para todos; quién abrió cada cuenta, solo el administrador.
+      const [equipo, miembros] = await Promise.all([api.equipo(), admin ? api.miembros() : []]);
       await exportarVentasYGastos({
         desde: periodo.desde, hasta: periodo.hasta, cerrados, gastos, nombreCuenta: nombre, negocio: ctx.negocio, admin,
+        menu: ctx.menu, equipo, miembros,
       });
       aviso("Excel descargado");
     } catch {
