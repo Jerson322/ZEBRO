@@ -153,20 +153,18 @@ create table if not exists public.pedidos (
   motivo_anulacion text
 );
 
--- Los domicilios tienen su propia numeración (Domicilio #1, #2…), aparte del número de la venta.
+-- Los domicilios tienen su propia numeración, aparte del número de la venta,
+-- y vuelve a empezar en #1 cada día (hora de Colombia).
 alter table public.pedidos add column if not exists numero_domicilio bigint;
-create sequence if not exists public.numero_domicilio_seq;
-with sin_numero as (
-  select id, row_number() over (order by creado) + coalesce((select max(numero_domicilio) from public.pedidos), 0) as n
-  from public.pedidos where tipo = 'domicilio' and numero_domicilio is null
+drop sequence if exists public.numero_domicilio_seq;
+with por_dia as (
+  select id, row_number() over (
+    partition by (creado at time zone 'America/Bogota')::date order by creado, numero
+  ) as n
+  from public.pedidos where tipo = 'domicilio'
 )
-update public.pedidos p set numero_domicilio = s.n from sin_numero s where p.id = s.id;
-do $$
-begin
-  perform setval('public.numero_domicilio_seq',
-    greatest(coalesce((select max(numero_domicilio) from public.pedidos), 0), 1),
-    (select max(numero_domicilio) from public.pedidos) is not null);
-end $$;
+update public.pedidos p set numero_domicilio = d.n
+from por_dia d where p.id = d.id and p.numero_domicilio is distinct from d.n;
 
 create unique index if not exists una_cuenta_abierta_por_mesa
   on public.pedidos (mesa_id) where estado = 'abierto' and mesa_id is not null;
@@ -312,13 +310,20 @@ create or replace function public.crear_domicilio(
 language plpgsql security definer set search_path = public as $$
 declare
   v_id uuid;
+  v_numero bigint;
 begin
   perform exigir_rol('admin', 'cajero');
   if coalesce(trim(p_cliente), '') = '' or coalesce(trim(p_direccion), '') = '' then
     raise exception 'Escribe el cliente y la dirección';
   end if;
+  -- Un domicilio a la vez saca su número, para que dos cajas no tomen el mismo.
+  perform pg_advisory_xact_lock(hashtext('numero_domicilio'));
+  select coalesce(max(numero_domicilio), 0) + 1 into v_numero
+  from pedidos
+  where tipo = 'domicilio'
+    and (creado at time zone 'America/Bogota')::date = (now() at time zone 'America/Bogota')::date;
   insert into pedidos (tipo, numero_domicilio, entrega, cliente, telefono, direccion, envio, domiciliario_id, notas)
-  values ('domicilio', nextval('numero_domicilio_seq'), 'preparando', trim(p_cliente), coalesce(trim(p_telefono), ''), trim(p_direccion),
+  values ('domicilio', v_numero, 'preparando', trim(p_cliente), coalesce(trim(p_telefono), ''), trim(p_direccion),
           greatest(coalesce(p_envio, 0), 0), p_domiciliario, coalesce(trim(p_notas), ''))
   returning id into v_id;
   return v_id;
