@@ -22,7 +22,7 @@ function comanda(p, nombre, items, boton) {
 }
 
 export async function pintar($vista, ctx) {
-  const [abiertos, mesas] = await Promise.all([api.pedidosAbiertos(), api.mesas()]);
+  const [abiertos, mesas] = await Promise.all([api.pedidosEnCocina(), api.mesas()]);
   const rol = ctx.perfil.rol;
   const nombre = (p) =>
     p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa" : `Domicilio #${p.numero_domicilio ?? p.numero} · ${p.cliente}`;
@@ -30,7 +30,7 @@ export async function pintar($vista, ctx) {
     abiertos.map((p) => ({ p, items: p.pedido_items.filter((i) => i.estado === estado) })).filter((x) => x.items.length);
 
   const porPreparar = con("cocina").map(({ p, items }) =>
-    comanda(p, nombre(p), items, rol !== "mesero" && { accion: "listo", texto: "Listo" })
+    comanda(p, nombre(p), items, ["admin", "cajero", "cocina"].includes(rol) && { accion: "listo", texto: "Listo" })
   );
   const listos = con("listo").map(({ p, items }) =>
     comanda(p, nombre(p), items, rol !== "cocina" && { accion: "entregado", texto: "Entregado" })

@@ -83,6 +83,24 @@ export const movimientos = (limite = 30) =>
 export const pedidosAbiertos = () =>
   resultado(sb.from("pedidos").select("*, pedido_items(*)").eq("estado", "abierto").order("creado"));
 
+// Domicilios sin terminar: los que se están tomando y los facturados que faltan por entregar.
+export const domiciliosPendientes = () =>
+  resultado(sb.from("pedidos").select("*, pedido_items(*)").eq("tipo", "domicilio")
+    .or("estado.eq.abierto,and(estado.eq.pagado,entrega.in.(preparando,en_camino))").order("creado"));
+
+// Últimas entregas hechas por un domiciliario.
+export const historialEntregas = (empleadoId, limite = 50) =>
+  resultado(sb.from("pedidos").select("*, pedido_items(*)").eq("tipo", "domicilio").eq("entrega", "entregado")
+    .eq("domiciliario_id", empleadoId).order("entregado_en", { ascending: false }).limit(limite));
+
+// Ficha de empleado de quien tiene la sesión (null si no tiene).
+export const miEmpleado = () => resultado(sb.rpc("mi_empleado"));
+
+// Lo que cocina tiene en curso: cuentas abiertas y domicilios facturados que aún no salen.
+export const pedidosEnCocina = () =>
+  resultado(sb.from("pedidos").select("*, pedido_items(*)")
+    .or("estado.eq.abierto,and(tipo.eq.domicilio,estado.eq.pagado,entrega.eq.preparando)").order("creado"));
+
 export const pedido = (id) => resultado(sb.from("pedidos").select("*, pedido_items(*)").eq("id", id).maybeSingle());
 
 // Cuentas cerradas (pagadas o anuladas) entre dos fechas, ambas incluidas.
@@ -133,15 +151,19 @@ export const crearDomicilio = (d) =>
     p_cliente: d.cliente, p_telefono: d.telefono, p_direccion: d.direccion,
     p_envio: Number(d.envio) || 0, p_domiciliario: d.domiciliario || null, p_notas: d.notas,
   });
-export const actualizarDomicilio = (pedidoId, entrega, domiciliario) =>
-  rpc("actualizar_domicilio", { p_pedido: pedidoId, p_entrega: entrega, p_domiciliario: domiciliario || null });
+export const asignarDomiciliario = (pedidoId, domiciliario) =>
+  rpc("asignar_domiciliario", { p_pedido: pedidoId, p_domiciliario: domiciliario || null });
+export const cambiarEntrega = (pedidoId, entrega) => rpc("cambiar_entrega", { p_pedido: pedidoId, p_entrega: entrega });
+export const registrarNovedad = (pedidoId, texto) => rpc("registrar_novedad", { p_pedido: pedidoId, p_texto: texto });
+export const registrarRecibido = (pedidoId, valor) =>
+  rpc("registrar_recibido", { p_pedido: pedidoId, p_valor: valor === "" || valor == null ? null : Number(valor) });
 export const agregarItem = (pedidoId, platoId, cantidad, opcionesIds, nota) =>
   rpc("agregar_item", { p_pedido: pedidoId, p_plato: platoId, p_cantidad: cantidad, p_opciones: opcionesIds, p_nota: nota });
 export const quitarItem = (itemId) => rpc("quitar_item", { p_item: itemId });
 export const enviarCocina = (pedidoId) => rpc("enviar_cocina", { p_pedido: pedidoId });
 export const marcarItems = (pedidoId, de, a) => rpc("marcar_items", { p_pedido: pedidoId, p_de: de, p_a: a });
-export const cobrar = (pedidoId, metodo, propina) =>
-  rpc("cobrar", { p_pedido: pedidoId, p_metodo: metodo, p_propina: Number(propina) || 0 });
+// Ya no se cobra propina: siempre va en 0.
+export const cobrar = (pedidoId, metodo) => rpc("cobrar", { p_pedido: pedidoId, p_metodo: metodo, p_propina: 0 });
 export const anular = (pedidoId, motivo) => rpc("anular", { p_pedido: pedidoId, p_motivo: motivo });
 export const moverInsumo = (insumoId, tipo, cantidad, costo, motivo) =>
   rpc("mover_insumo", {

@@ -10,9 +10,14 @@
 create table if not exists public.miembros (
   user_id uuid primary key references auth.users (id) on delete cascade,
   nombre text not null,
-  rol text not null check (rol in ('admin', 'cajero', 'mesero', 'cocina')),
+  rol text not null check (rol in ('admin', 'cajero', 'mesero', 'cocina', 'domiciliario')),
   activo boolean not null default true
 );
+
+-- Rol domiciliario: solo ve los domicilios por entregar y los marca como entregados.
+alter table public.miembros drop constraint if exists miembros_rol_check;
+alter table public.miembros add constraint miembros_rol_check
+  check (rol in ('admin', 'cajero', 'mesero', 'cocina', 'domiciliario'));
 
 create or replace function public.rol_actual() returns text
 language sql stable security definer set search_path = public as $$
@@ -153,6 +158,36 @@ create table if not exists public.pedidos (
   motivo_anulacion text
 );
 
+-- Estado de un domicilio: vacío mientras se toma el pedido, "preparando" al facturarlo,
+-- luego "en camino" y "entregado" (se puede pasar directo de preparando a entregado).
+-- Ajuste de una sola vez (antes de existir la columna "novedades"): si los domicilios todavía
+-- tienen los estados viejos, los ya cobrados se dan por entregados.
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'pedidos' and column_name = 'novedades'
+  ) then
+    if exists (
+      select 1 from pg_constraint
+      where conname = 'pedidos_entrega_check' and pg_get_constraintdef(oid) like '%en_camino%'
+    ) then
+      update public.pedidos set entrega = null where tipo = 'domicilio' and estado = 'abierto';
+      update public.pedidos set entrega = 'entregado'
+      where tipo = 'domicilio' and estado <> 'abierto' and entrega is distinct from 'entregado';
+    end if;
+    alter table public.pedidos drop constraint if exists pedidos_entrega_check;
+    alter table public.pedidos add constraint pedidos_entrega_check
+      check (entrega in ('preparando', 'en_camino', 'entregado'));
+  end if;
+end $$;
+
+-- Lo que registra el domiciliario: novedades del camino, lo que le pagó el cliente
+-- (contra entrega) y a qué hora entregó.
+alter table public.pedidos add column if not exists novedades text not null default '';
+alter table public.pedidos add column if not exists recibido integer check (recibido is null or recibido >= 0);
+alter table public.pedidos add column if not exists entregado_en timestamptz;
+
 -- Los domicilios tienen su propia numeración, aparte del número de la venta,
 -- y vuelve a empezar en #1 cada día (hora de Colombia).
 alter table public.pedidos add column if not exists numero_domicilio bigint;
@@ -255,6 +290,29 @@ begin
   end loop;
 end $$;
 
+-- Ficha de empleado de quien tiene la sesión (para saber cuáles domicilios son suyos).
+create or replace function public.mi_empleado() returns uuid
+language sql stable security definer set search_path = public as $$
+  select id from empleados where user_id = auth.uid() and activo limit 1
+$$;
+
+-- El domiciliario no ve ventas: solo las mesas abiertas (para tomar pedidos) y sus domicilios
+-- ya facturados, más los que nadie tiene asignados.
+drop policy if exists "equipo lee" on public.pedidos;
+create policy "equipo lee" on public.pedidos for select to authenticated using (
+  case rol_actual()
+    when 'domiciliario' then
+      (tipo = 'mesa' and estado = 'abierto')
+      or (tipo = 'domicilio' and estado = 'pagado' and entrega is not null
+          and (domiciliario_id is null or domiciliario_id = mi_empleado()))
+    else rol_actual() is not null
+  end
+);
+drop policy if exists "equipo lee" on public.pedido_items;
+create policy "equipo lee" on public.pedido_items for select to authenticated using (
+  rol_actual() is not null and exists (select 1 from pedidos p where p.id = pedido_id)
+);
+
 -- Solo el administrador cambia el menú, las recetas, las mesas y los empleados.
 do $$
 declare
@@ -307,7 +365,7 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_id uuid;
 begin
-  perform exigir_rol('admin', 'cajero', 'mesero');
+  perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
   select id into v_id from pedidos where mesa_id = p_mesa and estado = 'abierto';
   if v_id is not null then
     return v_id;
@@ -335,22 +393,108 @@ begin
   if coalesce(trim(p_cliente), '') = '' then
     raise exception 'Escribe el nombre del cliente';
   end if;
+  if coalesce(p_envio, 0) not in (0, 1000, 2000) then
+    raise exception 'El envío solo puede ser 0, 1.000 o 2.000';
+  end if;
   -- El número del día lo pone la regla "numero_domicilio" de la tabla.
-  insert into pedidos (tipo, entrega, cliente, telefono, direccion, envio, domiciliario_id, notas)
-  values ('domicilio', 'preparando', trim(p_cliente), coalesce(trim(p_telefono), ''), coalesce(trim(p_direccion), ''),
-          greatest(coalesce(p_envio, 0), 0), p_domiciliario, coalesce(trim(p_notas), ''))
+  -- Queda sin estado de entrega: pasa a "preparando" cuando se factura.
+  insert into pedidos (tipo, cliente, telefono, direccion, envio, domiciliario_id, notas)
+  values ('domicilio', trim(p_cliente), coalesce(trim(p_telefono), ''), coalesce(trim(p_direccion), ''),
+          coalesce(p_envio, 0), p_domiciliario, coalesce(trim(p_notas), ''))
   returning id into v_id;
   return v_id;
 end $$;
 
-create or replace function public.actualizar_domicilio(p_pedido uuid, p_entrega text, p_domiciliario uuid) returns void
+drop function if exists public.actualizar_domicilio(uuid, text, uuid);
+
+create or replace function public.asignar_domiciliario(p_pedido uuid, p_domiciliario uuid) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   perform exigir_rol('admin', 'cajero');
-  update pedidos set entrega = coalesce(p_entrega, entrega), domiciliario_id = p_domiciliario
+  update pedidos set domiciliario_id = p_domiciliario
   where id = p_pedido and tipo = 'domicilio' and estado <> 'anulado';
   if not found then
     raise exception 'Ese domicilio no existe o está anulado';
+  end if;
+end $$;
+
+drop function if exists public.marcar_entregado(uuid);
+
+-- Revisa que quien llama pueda tocar este domicilio (ya facturado y no anulado).
+-- Un domiciliario solo toca los suyos; si no tenía a nadie asignado, queda a su nombre.
+-- Uso interno: solo la llaman las funciones de abajo.
+create or replace function public.domicilio_para_mi(p_pedido uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_pedido pedidos;
+  v_yo uuid;
+begin
+  perform exigir_rol('admin', 'cajero', 'domiciliario');
+  select * into v_pedido from pedidos where id = p_pedido and tipo = 'domicilio' for update;
+  if not found or v_pedido.estado <> 'pagado' or v_pedido.entrega is null then
+    raise exception 'Ese domicilio no existe, no se ha facturado o está anulado';
+  end if;
+  if rol_actual() = 'domiciliario' then
+    v_yo := mi_empleado();
+    if v_yo is null then
+      raise exception 'Tu usuario no está ligado a una ficha de empleado. Pídele al administrador que lo revise.';
+    end if;
+    if v_pedido.domiciliario_id is null then
+      update pedidos set domiciliario_id = v_yo where id = p_pedido;
+    elsif v_pedido.domiciliario_id <> v_yo then
+      raise exception 'Ese domicilio está asignado a otro domiciliario';
+    end if;
+  end if;
+end $$;
+
+-- Preparando → En camino → Entregado. Se puede saltar directo a Entregado.
+create or replace function public.cambiar_entrega(p_pedido uuid, p_entrega text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if p_entrega not in ('preparando', 'en_camino', 'entregado') then
+    raise exception 'Estado no válido';
+  end if;
+  perform domicilio_para_mi(p_pedido);
+  update pedidos set
+    entrega = p_entrega,
+    entregado_en = case when p_entrega = 'entregado' then coalesce(entregado_en, now()) end
+  where id = p_pedido;
+  if p_entrega = 'entregado' then
+    update pedido_items set estado = 'entregado' where pedido_id = p_pedido;
+  end if;
+end $$;
+
+-- Novedades del camino (dirección errada, cliente no contesta…). Se van sumando con hora y nombre.
+create or replace function public.registrar_novedad(p_pedido uuid, p_texto text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(trim(p_texto), '') = '' then
+    raise exception 'Escribe la novedad';
+  end if;
+  perform domicilio_para_mi(p_pedido);
+  update pedidos set novedades = concat_ws(E'\n', nullif(novedades, ''),
+    to_char(now() at time zone 'America/Bogota', 'HH12:MI am') || ' · '
+      || coalesce((select nombre from miembros where user_id = auth.uid()), '') || ': ' || trim(p_texto))
+  where id = p_pedido;
+end $$;
+
+-- Lo que el cliente le pagó al domiciliario (pago contra entrega). Null = no aplica.
+create or replace function public.registrar_recibido(p_pedido uuid, p_valor integer) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if p_valor is not null and p_valor < 0 then
+    raise exception 'El valor no puede ser negativo';
+  end if;
+  perform domicilio_para_mi(p_pedido);
+  update pedidos set recibido = p_valor where id = p_pedido;
+end $$;
+
+-- El domiciliario toma pedidos en las mesas, pero no cambia platos ni cantidades de un domicilio.
+create or replace function public.solo_mesas_si_domiciliario(p_pedido uuid) returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if rol_actual() = 'domiciliario' and not exists (select 1 from pedidos where id = p_pedido and tipo = 'mesa') then
+    raise exception 'No puedes cambiar los platos de un domicilio' using errcode = '42501';
   end if;
 end $$;
 
@@ -366,10 +510,11 @@ declare
   v_extra integer;
   v_elegidas uuid[] := coalesce(p_opciones, '{}');
 begin
-  perform exigir_rol('admin', 'cajero', 'mesero');
+  perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
   if not exists (select 1 from pedidos where id = p_pedido and estado = 'abierto') then
     raise exception 'Esta cuenta ya está cerrada';
   end if;
+  perform solo_mesas_si_domiciliario(p_pedido);
   if p_cantidad is null or p_cantidad < 1 then
     raise exception 'La cantidad debe ser 1 o más';
   end if;
@@ -418,12 +563,13 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_estado text;
 begin
-  perform exigir_rol('admin', 'cajero', 'mesero');
+  perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
   select i.estado into v_estado from pedido_items i join pedidos p on p.id = i.pedido_id
   where i.id = p_item and p.estado = 'abierto';
   if not found then
     raise exception 'Ese plato ya no se puede quitar';
   end if;
+  perform solo_mesas_si_domiciliario((select pedido_id from pedido_items where id = p_item));
   if v_estado <> 'nuevo' then
     perform exigir_rol('admin', 'cajero');
   end if;
@@ -435,7 +581,8 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_total integer;
 begin
-  perform exigir_rol('admin', 'cajero', 'mesero');
+  perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
+  perform solo_mesas_si_domiciliario(p_pedido);
   update pedido_items i set estado = 'cocina'
   from pedidos p
   where i.pedido_id = p.id and p.id = p_pedido and p.estado = 'abierto' and i.estado = 'nuevo';
@@ -450,7 +597,7 @@ begin
   if p_de = 'cocina' and p_a = 'listo' then
     perform exigir_rol('admin', 'cajero', 'cocina');
   elsif p_de = 'listo' and p_a = 'entregado' then
-    perform exigir_rol('admin', 'cajero', 'mesero');
+    perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
   else
     raise exception 'Cambio de estado no permitido';
   end if;
@@ -518,8 +665,13 @@ begin
     propina = greatest(coalesce(p_propina, 0), 0),
     costo = (select coalesce(sum(costo * cantidad), 0) from pedido_items where pedido_id = p_pedido),
     metodo_pago = p_metodo,
-    cerrado = now()
+    cerrado = now(),
+    -- Un domicilio facturado pasa a preparación y lo que falte se manda a cocina.
+    entrega = case when tipo = 'domicilio' then 'preparando' else entrega end
   where id = p_pedido;
+  if v_pedido.tipo = 'domicilio' then
+    update pedido_items set estado = 'cocina' where pedido_id = p_pedido and estado = 'nuevo';
+  end if;
   return v_total;
 end $$;
 
@@ -601,7 +753,7 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_resultado jsonb;
 begin
-  perform exigir_rol('admin', 'cajero', 'mesero', 'cocina');
+  perform exigir_rol('admin', 'cajero', 'mesero', 'cocina', 'domiciliario');
   with tomados as (
     update pedido_items set impreso = now()
     where estado = 'cocina' and impreso is null
@@ -637,7 +789,8 @@ declare
   f text;
 begin
   foreach f in array array['rol_actual()', 'exigir_rol(text[])', 'reclamar_admin(text)', 'lista_equipo()',
-    'abrir_mesa(uuid)', 'crear_domicilio(text, text, text, integer, uuid, text)', 'actualizar_domicilio(uuid, text, uuid)',
+    'abrir_mesa(uuid)', 'crear_domicilio(text, text, text, integer, uuid, text)', 'asignar_domiciliario(uuid, uuid)',
+    'mi_empleado()', 'cambiar_entrega(uuid, text)', 'registrar_novedad(uuid, text)', 'registrar_recibido(uuid, integer)',
     'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid)', 'enviar_cocina(uuid)',
     'marcar_items(uuid, text, text)', 'cobrar(uuid, text, integer)', 'anular(uuid, text)',
     'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()',
@@ -646,6 +799,10 @@ begin
     execute format('grant execute on function public.%s to authenticated', f);
   end loop;
 end $$;
+
+-- Funciones de uso interno: nadie las llama directo, solo otras funciones.
+revoke all on function public.domicilio_para_mi(uuid) from public, anon, authenticated;
+revoke all on function public.solo_mesas_si_domiciliario(uuid) from public, anon, authenticated;
 
 -- Actualizaciones en vivo para mesas, cocina y domicilios.
 -- Si una tabla ya estaba activada (por ejemplo, desde el panel de Supabase), se deja como está.

@@ -19,7 +19,6 @@ export async function pintar($vista, ctx) {
   const suma = (lista, f) => lista.reduce((s, x) => s + Number(f(x) || 0), 0);
   const ventas = suma(pagados, (p) => p.total);
   const costo = suma(pagados, (p) => p.costo);
-  const propinas = suma(pagados, (p) => p.propina);
   const totalGastos = suma(gastos, (g) => g.valor);
   const nombre = (p) => (p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa" : `Domicilio #${p.numero_domicilio ?? p.numero} · ${p.cliente}`);
 
@@ -42,14 +41,13 @@ export async function pintar($vista, ctx) {
     </div>
     <div class="tarjetas">
       ${tarjeta(`Ventas (${pagados.length})`, pesos(ventas))}
-      ${tarjeta("Propinas", pesos(propinas))}
       ${tarjeta("Gastos", pesos(totalGastos))}
       ${admin ? tarjeta("Costo de lo vendido", pesos(costo)) : ""}
       ${admin ? tarjeta("Utilidad", pesos(ventas - costo - totalGastos), ventas - costo - totalGastos < 0 ? "negativo" : "positivo") : ""}
     </div>
     <div class="columnas">
       <div class="panel"><h2>Dinero recibido por método</h2>
-        ${tabla(["Método", "#Total con propina"], porMetodo.map(([m, v]) => `<tr><td>${m}</td><td class="num">${pesos(v)}</td></tr>`), "Sin ventas en este periodo.")}</div>
+        ${tabla(["Método", "#Total"], porMetodo.map(([m, v]) => `<tr><td>${m}</td><td class="num">${pesos(v)}</td></tr>`), "Sin ventas en este periodo.")}</div>
       <div class="panel"><h2>Platos más vendidos</h2>
         ${tabla(admin ? ["Plato", "#Cant.", "#Ventas", "#Ganancia"] : ["Plato", "#Cant.", "#Ventas"],
           [...platos.values()].sort((a, b) => b.total - a.total).map((f) => `<tr><td class="ancho">${esc(f.nombre)}</td>

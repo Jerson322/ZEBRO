@@ -12,19 +12,21 @@ import { preferencia, guardarPreferencia, imprimir, ticketComanda } from "./impr
 import { iconos } from "./iconos.js";
 
 const SECCIONES = [
-  { id: "mesas", nombre: "Mesas", vista: servicio.mesas, roles: ["admin", "cajero", "mesero"], enVivo: true },
-  { id: "domicilios", nombre: "Domicilios", vista: servicio.domicilios, roles: ["admin", "cajero"], enVivo: true },
-  { id: "cocina", nombre: "Cocina", vista: cocina.pintar, roles: ["admin", "cajero", "mesero", "cocina"], enVivo: true },
+  { id: "mesas", nombre: "Mesas", vista: servicio.mesas, roles: ["admin", "cajero", "mesero", "domiciliario"], enVivo: true },
+  { id: "domicilios", nombre: "Domicilios", vista: servicio.domicilios, roles: ["admin", "cajero", "domiciliario"], enVivo: true },
+  { id: "cocina", nombre: "Cocina", vista: cocina.pintar, roles: ["admin", "cajero", "mesero", "cocina", "domiciliario"], enVivo: true },
   { id: "menu", nombre: "Menú y recetas", corto: "Menú", vista: menu.pintar, roles: ["admin"] },
   { id: "inventario", nombre: "Inventario", vista: inventario.pintar, roles: ["admin"] },
   { id: "finanzas", nombre: "Ventas y gastos", corto: "Ventas", vista: finanzas.pintar, roles: ["admin", "cajero"] },
   { id: "equipo", nombre: "Empleados", corto: "Equipo", vista: equipo.pintar, roles: ["admin"] },
   { id: "ajustes", nombre: "Ajustes", vista: ajustes.pintar, roles: ["admin"] },
 ];
-const ROLES = { admin: "Administrador", cajero: "Cajero", mesero: "Mesero", cocina: "Cocina" };
+const ROLES = { admin: "Administrador", cajero: "Cajero", mesero: "Mesero", cocina: "Cocina", domiciliario: "Domiciliario" };
 const REVISAR_COMANDAS_CADA_MS = 15000;
 // Pantalla de una cuenta (mesa o domicilio): no aparece en el menú.
-const CUENTA = { id: "pedido", vista: servicio.cuenta, roles: ["admin", "cajero", "mesero"], enVivo: true };
+const CUENTA = { id: "pedido", vista: servicio.cuenta, roles: ["admin", "cajero", "mesero", "domiciliario"], enVivo: true };
+// Pantalla con la que arranca cada rol (si no, la primera del menú).
+const INICIO = { domiciliario: "domicilios" };
 
 const $vista = document.getElementById("vista");
 const $menu = document.getElementById("menu");
@@ -71,7 +73,8 @@ function rutaActual() {
   const [id, param] = location.hash.slice(1).split("/");
   const permitidas = seccionesPermitidas();
   if (id === CUENTA.id && CUENTA.roles.includes(ctx.perfil.rol) && param) return { seccion: CUENTA, param };
-  return { seccion: permitidas.find((s) => s.id === id) ?? permitidas[0], param };
+  const inicio = permitidas.find((s) => s.id === INICIO[ctx.perfil.rol]) ?? permitidas[0];
+  return { seccion: permitidas.find((s) => s.id === id) ?? inicio, param };
 }
 
 let pintando = Promise.resolve();

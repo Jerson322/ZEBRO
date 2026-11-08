@@ -1,11 +1,38 @@
 // Servicio: mapa de mesas, domicilios y la cuenta de cada uno (tomar pedido, cocina, cobro).
 import * as api from "../api.js";
-import { esc, pesos, opciones, formulario, mostrar, cerrarDialogo, hora, minutosDesde, aviso } from "../util.js";
+import { esc, pesos, opciones, formulario, mostrar, cerrarDialogo, hora, minutosDesde, aviso, tarjeta as tarjetaResumen } from "../util.js";
 import { preferencia, guardarPreferencia, imprimir, ticketCuenta } from "../impresion.js";
 
 const METODOS = ["Efectivo", "Tarjeta", "Transferencia", "Nequi", "Daviplata"];
-const PROPINA_SUGERIDA = 0.1;
-const ENTREGAS = [["preparando", "Preparando"], ["en_camino", "En camino"], ["entregado", "Entregado"]];
+// Un domicilio solo tiene estos valores de envío.
+const ENVIOS = [[0, "Sin envío"], [1000, "$ 1.000"], [2000, "$ 2.000"]];
+// Sin estado = se está tomando el pedido; al facturarlo pasa a preparación.
+const ENTREGA = { preparando: "En preparación", en_camino: "En camino", entregado: "Entregado" };
+const textoEntrega = (p) => (p.entrega ? ENTREGA[p.entrega] : "Tomando pedido");
+// Quién cambia el estado, las novedades y lo recibido de un domicilio ya facturado.
+const puedeEntregar = (rol, p) =>
+  p.estado === "pagado" && Boolean(p.entrega) && ["admin", "cajero", "domiciliario"].includes(rol);
+// Botones de estado: se puede pasar a cualquiera, incluso de "preparando" directo a "entregado".
+const botonesEntrega = (p) => Object.entries(ENTREGA).map(([valor, texto]) => p.entrega === valor
+  ? `<button class="chico principal" disabled>${texto}</button>`
+  : `<button class="chico" data-pedido="${p.id}" data-entrega="${valor}">${texto}</button>`).join("");
+
+// Cambia el estado desde cualquier botón con data-entrega.
+function activarBotonesEntrega($raiz, ctx) {
+  $raiz.querySelectorAll("[data-entrega]").forEach(($b) =>
+    $b.addEventListener("click", async () => {
+      $b.disabled = true;
+      try {
+        await api.cambiarEntrega($b.dataset.pedido, $b.dataset.entrega);
+        aviso(`Domicilio: ${ENTREGA[$b.dataset.entrega].toLowerCase()}`);
+        ctx.refrescar();
+      } catch (error) {
+        aviso(error.message);
+        $b.disabled = false;
+      }
+    })
+  );
+}
 const ESTADO_ITEM = { nuevo: "Sin enviar", cocina: "En cocina", listo: "¡Listo!", entregado: "Entregado" };
 
 const subtotal = (p) => p.pedido_items.reduce((s, i) => s + i.precio * i.cantidad, 0);
@@ -100,22 +127,70 @@ function editarMesas(lista, ctx) {
 // Domicilios
 
 export async function domicilios($vista, ctx) {
-  const abiertos = (await api.pedidosAbiertos()).filter((p) => p.tipo === "domicilio");
-  const equipo = await api.equipo();
-  const nombreDe = (id) => equipo.find((e) => e.id === id)?.nombre ?? "Sin asignar";
-  const textoEntrega = Object.fromEntries(ENTREGAS);
-  const filas = abiertos.map((p) => `<button class="domicilio" data-pedido="${p.id}">
-      <span><strong>#${p.numero_domicilio ?? p.numero} ${esc(p.cliente)}</strong>${p.direccion ? `<br><small class="suave">${esc(p.direccion)}</small>` : ""}</span>
-      <span class="num"><strong>${pesos(totalCuenta(p))}</strong><br>
-        <small class="etiqueta">${textoEntrega[p.entrega] ?? ""}</small> <small class="suave">${esc(nombreDe(p.domiciliario_id))}</small></span>
-    </button>`);
+  const rol = ctx.perfil.rol;
+  const domiciliario = rol === "domiciliario";
+  const yo = domiciliario ? await api.miEmpleado() : null;
+  const [pendientes, equipo, historial] = await Promise.all([
+    api.domiciliosPendientes(), api.equipo(), yo ? api.historialEntregas(yo) : [],
+  ]);
+  const nombreDe = (id) => equipo.find((e) => e.id === id)?.nombre;
+  const porEntregar = pendientes.filter((p) => p.estado === "pagado");
+  const tomando = pendientes.filter((p) => p.estado === "abierto");
+
+  const tarjeta = (p) => `<div class="domicilio">
+      <span><strong>#${p.numero_domicilio ?? p.numero} ${esc(p.cliente)}</strong>
+        ${p.direccion ? `<br><small class="suave">${esc(p.direccion)}</small>` : ""}
+        ${p.telefono ? `<br><small><a href="tel:${esc(p.telefono)}">${esc(p.telefono)}</a></small>` : ""}
+        ${p.notas ? `<br><small class="suave">Ref.: ${esc(p.notas)}</small>` : ""}
+        ${p.novedades ? `<br><small class="error">Tiene novedades</small>` : ""}</span>
+      <span class="num"><strong>${pesos(totalMostrado(p))}</strong><br>
+        <small class="etiqueta">${textoEntrega(p)}</small>
+        ${!domiciliario && nombreDe(p.domiciliario_id) ? `<small class="suave">${esc(nombreDe(p.domiciliario_id))}</small>` : ""}
+        ${p.entrega === "entregado" ? `<br><small class="suave">${hora(p.entregado_en)}${p.recibido != null ? ` · recibió ${pesos(p.recibido)}` : ""}</small>` : ""}
+        <span class="botones-domicilio">
+          ${puedeEntregar(rol, p) && p.entrega !== "entregado"
+            ? `${p.entrega === "preparando" ? `<button class="chico" data-pedido="${p.id}" data-entrega="en_camino">En camino</button>` : ""}
+               <button class="chico principal" data-pedido="${p.id}" data-entrega="entregado">Entregado</button>` : ""}
+          <a class="boton chico" href="#pedido/${p.id}">Ver</a>
+        </span></span>
+    </div>`;
+  const lista = (pedidos, vacio) => pedidos.length
+    ? `<div class="lista-domicilios">${pedidos.map(tarjeta).join("")}</div>`
+    : `<p class="vacio">${vacio}</p>`;
+  const suma = (pedidos) => pedidos.reduce((s, p) => s + (p.total ?? 0), 0);
+
+  if (domiciliario) {
+    const mios = porEntregar.filter((p) => p.domiciliario_id === yo);
+    const libres = porEntregar.filter((p) => !p.domiciliario_id);
+    const hoy = new Date().toDateString();
+    const deHoy = historial.filter((p) => new Date(p.entregado_en).toDateString() === hoy);
+    $vista.innerHTML = `
+      <div class="encabezado"><h1>Mis domicilios</h1><small class="suave">Se actualiza solo</small></div>
+      ${yo ? "" : `<div class="panel"><p class="error" style="margin:0">Tu usuario no está ligado a una ficha de empleado:
+        no puedes tomar domicilios. Pídele al administrador que te dé el acceso desde «Empleados».</p></div>`}
+      <div class="tarjetas">
+        ${tarjetaResumen(`Por entregar (${mios.length})`, pesos(suma(mios)))}
+        ${tarjetaResumen(`Entregados hoy (${deHoy.length})`, pesos(suma(deHoy)))}
+      </div>
+      <h2>Asignados a mí (${mios.length})</h2>
+      ${lista(mios, "No tienes domicilios asignados.")}
+      <h2>Sin asignar (${libres.length})</h2>
+      <p class="suave" style="margin-top:-6px">Si cambias el estado de uno de estos, queda a tu nombre.</p>
+      ${lista(libres, "No hay domicilios sin asignar.")}
+      <h2>Mi historial de entregas</h2>
+      ${lista(historial, "Todavía no has entregado domicilios.")}`;
+    activarBotonesEntrega($vista, ctx);
+    return;
+  }
+
   $vista.innerHTML = `
     <div class="encabezado"><h1>Domicilios</h1><button class="principal" id="nuevo-domicilio">Nuevo domicilio</button></div>
-    ${filas.length ? `<div class="lista-domicilios">${filas.join("")}</div>` : `<p class="vacio">No hay domicilios pendientes.</p>`}`;
-  $vista.querySelectorAll("[data-pedido]").forEach(($b) =>
-    $b.addEventListener("click", () => ctx.ir(`pedido/${$b.dataset.pedido}`))
-  );
-  document.getElementById("nuevo-domicilio").addEventListener("click", () => {
+    <h2>Por entregar (${porEntregar.length})</h2>
+    ${lista(porEntregar, "No hay domicilios por entregar.")}
+    <h2>Tomando pedido (${tomando.length})</h2>
+    ${lista(tomando, "No hay domicilios sin facturar.")}`;
+  activarBotonesEntrega($vista, ctx);
+  document.getElementById("nuevo-domicilio")?.addEventListener("click", () => {
     let creado = null;
     formulario("Nuevo domicilio", `
       <div class="fila">
@@ -124,10 +199,10 @@ export async function domicilios($vista, ctx) {
       </div>
       <label>Dirección (opcional)<input name="direccion"></label>
       <div class="fila">
-        <label>Valor del envío<input name="envio" type="number" min="0" step="100" value="0"></label>
+        <label>Envío<select name="envio">${opciones(ENVIOS, 0)}</select></label>
         <label>Domiciliario<select name="domiciliario"><option value="">Sin asignar</option>${opciones(equipo.map((e) => [e.id, e.nombre]))}</select></label>
       </div>
-      <label>Notas<input name="notas" placeholder="Ej. timbre dañado, pagar con billete de 50"></label>`,
+      <label>Referencias<input name="notas" placeholder="Ej. casa azul, timbre dañado, paga con billete de 50"></label>`,
       async (c) => { creado = await api.crearDomicilio(c); },
       { boton: "Crear y tomar pedido", alTerminar: () => ctx.ir(`pedido/${creado}`) });
   });
@@ -160,12 +235,30 @@ export async function cuenta($vista, ctx, pedidoId) {
     </div>`;
   }).join("");
 
-  const domicilio = p.tipo === "domicilio" ? `<div class="panel">
-      <p style="margin:0 0 8px"><strong>${esc(p.cliente)}</strong>${p.telefono ? ` · ${esc(p.telefono)}` : ""}${p.direccion ? `<br>${esc(p.direccion)}` : ""}
-        ${p.notas ? `<br><small class="suave">${esc(p.notas)}</small>` : ""}</p>
-      ${abierta && puedeCobrar(rol) ? `<div class="fila">
-        <label>Estado<select id="entrega">${opciones(ENTREGAS, p.entrega)}</select></label>
+  const esDomicilio = p.tipo === "domicilio";
+  const entrega = esDomicilio && puedeEntregar(rol, p);
+  const cambio = p.recibido != null && p.total != null ? p.recibido - p.total : 0;
+  const domicilio = esDomicilio ? `<div class="panel">
+      <p style="margin:0 0 8px"><strong>${esc(p.cliente)}</strong>
+        ${p.telefono ? ` · <a href="tel:${esc(p.telefono)}">${esc(p.telefono)}</a>` : ""}
+        ${p.direccion ? `<br>${esc(p.direccion)}` : ""}
+        ${p.notas ? `<br><small class="suave">Ref.: ${esc(p.notas)}</small>` : ""}</p>
+      ${p.estado !== "anulado" ? `<p style="margin:0 0 8px"><small class="etiqueta">${textoEntrega(p)}</small>
+        ${p.entregado_en ? `<small class="suave">a las ${hora(p.entregado_en)}</small>` : ""}</p>` : ""}
+      ${entrega ? `<div class="botones-domicilio" style="justify-content:flex-start;margin:0 0 12px">${botonesEntrega(p)}</div>` : ""}
+      ${puedeCobrar(rol) && p.entrega !== "entregado" && p.estado !== "anulado" ? `<div class="fila">
         <label>Domiciliario<select id="domiciliario"><option value="">Sin asignar</option>${opciones(equipo.map((e) => [e.id, e.nombre]), p.domiciliario_id ?? "")}</select></label>
+      </div>` : ""}
+      ${entrega ? `<div class="fila">
+        <label>Valor recibido del cliente (contra entrega)<input id="recibido" type="number" min="0" step="100" value="${p.recibido ?? ""}"></label>
+        <button id="guardar-recibido" style="align-self:end">Guardar</button>
+      </div>` : p.recibido != null ? `<p style="margin:0 0 8px">Recibido del cliente: <strong>${pesos(p.recibido)}</strong></p>` : ""}
+      ${p.recibido != null && cambio > 0 ? `<p class="suave" style="margin:0 0 8px">Cambio entregado: ${pesos(cambio)}</p>` : ""}
+      ${p.recibido != null && cambio < 0 ? `<p class="error" style="margin:0 0 8px">Faltan ${pesos(-cambio)} para el total</p>` : ""}
+      ${p.novedades ? `<p style="margin:0 0 8px;white-space:pre-line"><strong>Novedades</strong><br><small>${esc(p.novedades)}</small></p>` : ""}
+      ${entrega ? `<div class="fila">
+        <label>Registrar novedad<input id="novedad" placeholder="Ej. el cliente no contesta, dirección errada"></label>
+        <button id="agregar-novedad" style="align-self:end">Agregar</button>
       </div>` : ""}
     </div>` : "";
 
@@ -189,13 +282,13 @@ export async function cuenta($vista, ctx, pedidoId) {
         </div>
         ${abierta && items.length ? `<button class="ver-cuenta" id="ver-cuenta">${platosEnCuenta(items)} · Ver cuenta <strong>${pesos(totalMostrado(p))}</strong></button>` : ""}
         ${abierta ? `<div class="acciones-cuenta">
-          ${hay("nuevo") ? `<button class="principal" id="enviar">Enviar a cocina</button>` : ""}
-          ${hay("listo") && rol !== "cocina" ? `<button id="entregar">Marcar entregados</button>` : ""}
+          ${hay("nuevo") && !esDomicilio ? `<button class="principal" id="enviar">Enviar a cocina</button>` : ""}
+          ${hay("listo") && rol !== "cocina" && !esDomicilio ? `<button id="entregar">Marcar entregados</button>` : ""}
           ${items.length ? `<button id="precuenta">Imprimir cuenta</button>` : ""}
-          ${puedeCobrar(rol) && items.length ? `<button class="principal" id="cobrar">Cobrar</button>` : ""}
+          ${puedeCobrar(rol) && items.length ? `<button class="principal" id="cobrar">${esDomicilio ? "Facturar" : "Cobrar"}</button>` : ""}
           ${rol === "admin" ? `<button class="peligro" id="anular">Anular cuenta</button>` : ""}
         </div>` : `<div class="acciones-cuenta">
-          <button id="imprimir">Imprimir</button>
+          ${rol !== "domiciliario" ? `<button id="imprimir">Imprimir</button>` : ""}
           ${rol === "admin" && p.estado === "pagado" ? `<button class="peligro" id="anular">Anular venta</button>` : ""}
         </div>`}
       </div>
@@ -232,11 +325,13 @@ export async function cuenta($vista, ctx, pedidoId) {
     if (motivo === null) return;
     hecho(api.anular(p.id, motivo), "Cuenta anulada");
   });
-  const $entrega = document.getElementById("entrega");
   const $domiciliario = document.getElementById("domiciliario");
-  [$entrega, $domiciliario].forEach(($s) =>
-    $s?.addEventListener("change", () => hecho(api.actualizarDomicilio(p.id, $entrega.value, $domiciliario.value)))
-  );
+  $domiciliario?.addEventListener("change", () => hecho(api.asignarDomiciliario(p.id, $domiciliario.value)));
+  activarBotonesEntrega($vista, ctx);
+  document.getElementById("guardar-recibido")?.addEventListener("click", () =>
+    hecho(api.registrarRecibido(p.id, document.getElementById("recibido").value), "Valor recibido guardado"));
+  document.getElementById("agregar-novedad")?.addEventListener("click", () =>
+    hecho(api.registrarNovedad(p.id, document.getElementById("novedad").value), "Novedad registrada"));
 }
 
 function carta(menu) {
@@ -284,45 +379,39 @@ function elegirPlato(ctx, pedidoId, platoId) {
     { boton: "Agregar", alTerminar: () => ctx.refrescar() });
 }
 
+// Al facturar un domicilio pasa a preparación, va a cocina y la cuenta se imprime siempre.
 function formularioCobro(ctx, p, titulo) {
   const total = totalCuenta(p);
+  const domicilio = p.tipo === "domicilio";
   let cobro = null;
-  const $form = formulario(`Cobrar ${pesos(total)}`, `
+  const $form = formulario(`${domicilio ? "Facturar" : "Cobrar"} ${pesos(total)}`, `
     <label>Método de pago<select name="metodo">${opciones(METODOS)}</select></label>
-    <div class="fila">
-      <label>Propina<input name="propina" type="number" min="0" step="100" value="0"></label>
-      <label>Recibido (efectivo)<input name="recibido" type="number" min="0" step="100"></label>
-    </div>
-    <button type="button" id="sugerida">Agregar propina sugerida (${PROPINA_SUGERIDA * 100}%)</button>
-    <div class="total"><span>Total a recibir</span><span id="a-recibir">${pesos(total)}</span></div>
+    <label>Recibido (efectivo)<input name="recibido" type="number" min="0" step="100"></label>
+    <div class="total"><span>Total a recibir</span><span>${pesos(total)}</span></div>
     <p class="suave" id="cambio" style="margin:0"></p>
-    <label class="opcion"><input type="checkbox" name="imprimir"${preferencia("cuenta") ? " checked" : ""}> Imprimir la cuenta</label>`,
+    ${domicilio ? `<p class="suave" style="margin:0">Se imprime la cuenta y el pedido pasa a preparación.</p>`
+      : `<label class="opcion"><input type="checkbox" name="imprimir"${preferencia("cuenta") ? " checked" : ""}> Imprimir la cuenta</label>`}`,
     async (c) => {
-      await api.cobrar(p.id, c.metodo, c.propina);
+      await api.cobrar(p.id, c.metodo);
       cobro = c;
     },
     {
-      boton: "Confirmar pago",
+      boton: domicilio ? "Facturar" : "Confirmar pago",
       alTerminar: async () => {
-        guardarPreferencia("cuenta", Boolean(cobro.imprimir));
-        aviso("Cuenta cobrada");
-        if (cobro.imprimir) {
-          // Se imprime la cuenta ya cerrada, tal como quedó guardada (total, propina y método).
+        if (!domicilio) guardarPreferencia("cuenta", Boolean(cobro.imprimir));
+        aviso(domicilio ? "Domicilio facturado: en preparación" : "Cuenta cobrada");
+        // Si la comandera está en este equipo, la comanda del domicilio sale de una.
+        if (domicilio) ctx.imprimirPendientes();
+        if (domicilio || cobro.imprimir) {
+          // Se imprime la cuenta ya cerrada, tal como quedó guardada (total y método).
           const cerrada = await api.pedido(p.id);
           await imprimir(ticketCuenta(cerrada, ctx.negocio, { mesa: titulo, recibido: Number(cobro.recibido) || 0 }));
         }
         ctx.ir(p.tipo === "mesa" ? "mesas" : "domicilios");
       },
     });
-  const actualizar = () => {
-    const propina = Number($form.propina.value) || 0;
+  $form.addEventListener("input", () => {
     const recibido = Number($form.recibido.value) || 0;
-    $form.querySelector("#a-recibir").textContent = pesos(total + propina);
-    $form.querySelector("#cambio").textContent = recibido ? `Cambio: ${pesos(recibido - total - propina)}` : "";
-  };
-  $form.addEventListener("input", actualizar);
-  $form.querySelector("#sugerida").addEventListener("click", () => {
-    $form.propina.value = Math.round((subtotal(p) * PROPINA_SUGERIDA) / 100) * 100;
-    actualizar();
+    $form.querySelector("#cambio").textContent = recibido ? `Cambio: ${pesos(recibido - total)}` : "";
   });
 }

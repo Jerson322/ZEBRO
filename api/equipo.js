@@ -3,7 +3,7 @@
 // Solo responde a un administrador activo del sistema.
 import { SUPABASE_URL } from "../sistema/config.js";
 
-const ROLES = ["admin", "cajero", "mesero", "cocina"];
+const ROLES = ["admin", "cajero", "mesero", "cocina", "domiciliario"];
 const CLAVE_MINIMA = 8;
 
 function cabeceras(extra = {}) {
@@ -38,9 +38,22 @@ async function quienLlama(req) {
   return (await res.json())?.id ?? null;
 }
 
-async function esAdmin(userId) {
-  const r = await supabase(`/rest/v1/miembros?user_id=eq.${userId}&activo=eq.true&rol=eq.admin&select=user_id`);
-  return r.ok && r.data.length === 1;
+// null = es administrador; si no, el motivo exacto para mostrarlo.
+async function motivoNoAdmin(userId) {
+  const r = await supabase(`/rest/v1/miembros?user_id=eq.${userId}&select=rol,activo`);
+  if (!r.ok) {
+    return r.status === 401 || r.status === 403
+      ? "La clave SUPABASE_SECRET_KEY de Vercel no es válida: debe ser la secret (sb_secret_…) o la service_role, no la publishable/anon"
+      : "No se pudo revisar tu rol en Supabase. Intenta de nuevo.";
+  }
+  const miembro = r.data[0];
+  if (!miembro) {
+    // Con la clave pública el servidor no ve a nadie: casi siempre es eso.
+    return "El servidor no ve tu usuario en miembros. Revisa que SUPABASE_SECRET_KEY en Vercel sea la clave secreta (no la publishable/anon)";
+  }
+  if (!miembro.activo) return "Tu acceso está desactivado";
+  if (miembro.rol !== "admin") return "Solo el administrador puede hacer esto";
+  return null;
 }
 
 async function empleado(id) {
@@ -56,7 +69,9 @@ export default async function handler(req, res) {
     return fallo(res, 500, "Falta configurar SUPABASE_SECRET_KEY en Vercel");
   }
   const llamador = await quienLlama(req);
-  if (!llamador || !(await esAdmin(llamador))) return fallo(res, 403, "Solo el administrador puede hacer esto");
+  if (!llamador) return fallo(res, 401, "Tu sesión venció o la clave de Vercel no sirve. Sal del sistema y vuelve a entrar.");
+  const motivo = await motivoNoAdmin(llamador);
+  if (motivo) return fallo(res, 403, motivo);
 
   const { accion, empleadoId, correo, clave, rol } = req.body ?? {};
   const e = await empleado(empleadoId);

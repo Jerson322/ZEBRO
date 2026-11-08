@@ -4,9 +4,10 @@ import { esc, opciones, tabla, formulario, aviso } from "../util.js";
 
 // El rol del empleado se guarda en "cargo". Los que tienen acceso usan el rol del sistema equivalente.
 const ROLES_EMPLEADO = ["Mesero", "Cajero", "Cocina", "Domiciliario", "Administrador"];
-const ROL_SISTEMA = { Mesero: "mesero", Cajero: "cajero", Cocina: "cocina", Administrador: "admin" };
-const NOMBRE_ROL = { mesero: "Mesero", cajero: "Cajero", cocina: "Cocina", admin: "Administrador" };
-const ROLES_ACCESO = [["mesero", "Mesero: mesas y pedidos"], ["cajero", "Cajero: cobra, domicilios y gastos"], ["cocina", "Cocina: solo ve comandas"], ["admin", "Administrador: todo"]];
+const ROL_SISTEMA = { Mesero: "mesero", Cajero: "cajero", Cocina: "cocina", Domiciliario: "domiciliario", Administrador: "admin" };
+const NOMBRE_ROL = { mesero: "Mesero", cajero: "Cajero", cocina: "Cocina", domiciliario: "Domiciliario", admin: "Administrador" };
+const ROLES_ACCESO = [["mesero", "Mesero: mesas y pedidos"], ["cajero", "Cajero: cobra, domicilios y gastos"], ["cocina", "Cocina: solo ve comandas"],
+  ["domiciliario", "Domiciliario: sus domicilios y toma pedidos en mesas"], ["admin", "Administrador: todo"]];
 
 export async function pintar($vista, ctx) {
   const [empleados, miembros] = await Promise.all([api.empleados(), api.miembros()]);

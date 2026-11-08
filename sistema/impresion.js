@@ -84,7 +84,6 @@ export function ticketCuenta(p, negocio, { mesa, recibido } = {}) {
     ${p.envio ? fila("Subtotal", pesos(subtotal)) + fila("Envío", pesos(p.envio)) : ""}
     ${fila("TOTAL", pesos(total), "t-total")}
     ${pagada && p.propina ? fila("Propina", pesos(p.propina)) + fila("Total pagado", pesos(total + p.propina)) : ""}
-    ${!pagada ? `<div class="t-centro">Propina sugerida (10%): ${pesos(Math.round(subtotal * 0.1 / 100) * 100)}</div>` : ""}
     ${pagada ? fila("Pago", esc(p.metodo_pago)) : ""}
     ${pagada && cambio > 0 ? fila("Recibido", pesos(recibido)) + fila("Cambio", pesos(cambio)) : ""}
     <hr>
