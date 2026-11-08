@@ -1,10 +1,7 @@
-// Ajustes (solo administrador): datos del negocio para los tickets y cómo dejar lista la comandera.
+// Ajustes (solo administrador): nombre, logo y datos del negocio para el panel y los tickets.
 import * as api from "../api.js";
 import { esc, aviso } from "../util.js";
 import { imprimir, ticketCuenta } from "../impresion.js";
-
-const ACCESO_DIRECTO =
-  '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="C:\\ZEBRO-Chrome" https://zebro.store/sistema';
 
 export async function pintar($vista, ctx) {
   const n = ctx.negocio ?? {};
@@ -34,28 +31,7 @@ export async function pintar($vista, ctx) {
         <button type="button" id="prueba-ticket">Imprimir ticket de prueba</button>
         <button type="submit" class="principal">Guardar</button>
       </div>
-    </form>
-    <div class="panel guia">
-      <h2>Cómo dejar lista la comandera (XP-80T por red)</h2>
-      <ol>
-        <li><strong>Averigua la IP de la impresora:</strong> apágala, deja presionado el botón FEED y préndela.
-          Sale una hoja de prueba con su dirección IP (ej. 192.168.1.87).</li>
-        <li><strong>Instálala en el computador:</strong> instala el driver de Xprinter (viene en el CD o en la página de Xprinter)
-          y agrégala en Windows como impresora de red con esa IP (Configuración → Impresoras → Agregar → «La impresora que quiero no aparece» → por dirección TCP/IP).</li>
-        <li><strong>Papel de 80 mm:</strong> en las preferencias de impresión de la XP-80T elige el papel de 80 mm (o «80 x 297 mm»)
-          y activa el corte automático si aparece.</li>
-        <li><strong>Hazla la predeterminada:</strong> en Configuración → Impresoras, apaga «Permitir que Windows administre mi impresora predeterminada»
-          y marca la XP-80T como predeterminada.</li>
-        <li><strong>Crea el acceso directo del sistema:</strong> en el escritorio, clic derecho → Nuevo → Acceso directo, y pega esto:
-          <pre>${esc(ACCESO_DIRECTO)}</pre>
-          <button type="button" id="copiar-acceso">Copiar</button>
-          Llámalo «ZEBRO». Abre siempre el sistema desde ahí en ese computador: así imprime directo, sin preguntar.</li>
-        <li><strong>Activa la comandera en ese equipo:</strong> en el menú, prende «🖨️ Comandera aquí». Desde ahí, cada vez que
-          alguien toque «Enviar a cocina» (desde cualquier celular), ese computador imprime la comanda solo, en cualquier pantalla
-          que tenga abierta. Al cobrar, deja marcada «Imprimir la cuenta».</li>
-      </ol>
-      <p class="suave">Si la IP de la impresora cambia sola (por ejemplo al reiniciar el router), pídele a quien maneje tu internet que le deje una IP fija.</p>
-    </div>`;
+    </form>`;
 
   const $form = $vista.querySelector("#datos-negocio");
   $form.addEventListener("submit", async (evento) => {
@@ -102,14 +78,6 @@ export async function pintar($vista, ctx) {
   $quitar.addEventListener("click", () => {
     $logo.value = "";
     mostrarLogo();
-  });
-  $vista.querySelector("#copiar-acceso").addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(ACCESO_DIRECTO);
-      aviso("Copiado");
-    } catch {
-      aviso("No se pudo copiar: selecciona el texto y cópialo a mano");
-    }
   });
 }
 
