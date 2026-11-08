@@ -102,7 +102,7 @@ async function pintarAhora() {
   $menu.innerHTML =
     `<div class="marca">${logoNegocio()}<span>${esc(nombreNegocio())}</span></div>` +
     `<div class="secciones">${seccionesPermitidas()
-      .map((s) => `<a href="#${s.id}" class="${s.id === seccion.id || (seccion === CUENTA && s.id === "mesas") ? "activo" : ""}">${iconos[s.id]}<span data-corto="${s.corto ?? s.nombre}">${s.nombre}</span></a>`)
+      .map((s) => `<a href="#${s.id}" class="${s.id === seccion.id || (seccion === CUENTA && s.id === (ctx.volverA?.split("/")[0] ?? "mesas")) ? "activo" : ""}">${iconos[s.id]}<span data-corto="${s.corto ?? s.nombre}">${s.nombre}</span></a>`)
       .join("")}</div>` +
     `<div class="pie">
       <label class="comandera" title="Prende esto solo en el computador conectado a la comandera">
@@ -323,7 +323,11 @@ async function iniciar() {
   await entrar();
 }
 
-window.addEventListener("hashchange", () => {
+window.addEventListener("hashchange", (evento) => {
+  // Al abrir una cuenta se recuerda la pantalla de donde se vino, para que «Volver» regrese ahí
+  // (por ejemplo, a Ventas y gastos y no a Mesas).
+  const antes = new URL(evento.oldURL).hash.slice(1);
+  if (location.hash.startsWith(`#${CUENTA.id}/`) && antes && !antes.startsWith(`${CUENTA.id}/`)) ctx.volverA = antes;
   if (ctx.perfil) pintar();
 });
 // Al volver a la pestaña (por ejemplo, el celular estuvo bloqueado) se trae lo último.

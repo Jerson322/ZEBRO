@@ -290,7 +290,7 @@ export async function cuenta($vista, ctx, pedidoId) {
 
   $vista.innerHTML = `
     <div class="encabezado">
-      <h1><a href="#${p.tipo === "mesa" ? "mesas" : "domicilios"}" class="volver" aria-label="Volver">←</a> ${esc(titulo)}</h1>
+      <h1><a href="#${esc(ctx.volverA ?? (p.tipo === "mesa" ? "mesas" : "domicilios"))}" class="volver" aria-label="Volver">←</a> ${esc(titulo)}</h1>
       ${abierta ? "" : `<span class="etiqueta">${estadoCerrada}</span>`}
     </div>
     <div class="cuenta">
