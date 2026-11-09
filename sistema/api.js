@@ -151,6 +151,8 @@ export const registrarGasto = (gasto) => resultado(sb.from("gastos").insert(gast
 const rpc = (nombre, params) => resultado(sb.rpc(nombre, params));
 
 export const abrirMesa = (mesa) => rpc("abrir_mesa", { p_mesa: mesa });
+// Crea una mesa al momento (se borra sola al cobrar su cuenta) y devuelve el id de la cuenta.
+export const crearMesa = (nombre) => rpc("crear_mesa", { p_nombre: nombre });
 export const crearDomicilio = (d) =>
   rpc("crear_domicilio", {
     p_cliente: d.cliente, p_telefono: d.telefono, p_direccion: d.direccion,

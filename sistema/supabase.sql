@@ -243,6 +243,13 @@ create index if not exists items_por_pedido on public.pedido_items (pedido_id);
 -- Cuándo se imprimió la comanda de cada plato (null = falta imprimir).
 alter table public.pedido_items add column if not exists impreso timestamptz;
 
+-- Mesas creadas al momento con «Crear mesa»: se borran solas al cobrar (o anular) su cuenta.
+alter table public.mesas add column if not exists temporal boolean not null default false;
+-- Nombre de la mesa guardado en la cuenta al cerrarla (la mesa puede borrarse o cambiar de nombre).
+alter table public.pedidos add column if not exists mesa_nombre text;
+update public.pedidos p set mesa_nombre = m.nombre
+from public.mesas m where p.mesa_id = m.id and p.mesa_nombre is null and p.estado <> 'abierto';
+
 -- Mesa para comer aquí o para llevar (el cliente espera en el local).
 alter table public.pedidos add column if not exists para_llevar boolean not null default false;
 
@@ -407,6 +414,40 @@ exception when unique_violation then
   -- Otro mesero la abrió al mismo tiempo: se usa esa cuenta.
   select id into v_id from pedidos where mesa_id = p_mesa and estado = 'abierto';
   return v_id;
+end $$;
+
+-- Crea una mesa al momento (temporal) y le abre la cuenta. Devuelve el id de la cuenta.
+create or replace function public.crear_mesa(p_nombre text) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_mesa uuid;
+  v_id uuid;
+begin
+  perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
+  if coalesce(trim(p_nombre), '') = '' then
+    raise exception 'Escribe el nombre de la mesa';
+  end if;
+  insert into mesas (nombre, orden, temporal)
+  values (trim(p_nombre), coalesce((select max(orden) from mesas), 0) + 1, true)
+  returning id into v_mesa;
+  insert into pedidos (tipo, mesa_id) values ('mesa', v_mesa) returning id into v_id;
+  return v_id;
+end $$;
+
+-- Al cerrar o anular una cuenta de mesa se guarda el nombre de la mesa en la cuenta y, si la
+-- mesa era temporal, se borra. Uso interno.
+create or replace function public.soltar_mesa(p_pedido uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_mesa uuid;
+begin
+  select mesa_id into v_mesa from pedidos where id = p_pedido;
+  if v_mesa is null then
+    return;
+  end if;
+  update pedidos set mesa_nombre = (select nombre from mesas where id = v_mesa) where id = p_pedido;
+  delete from mesas where id = v_mesa and temporal
+    and not exists (select 1 from pedidos where mesa_id = v_mesa and estado = 'abierto' and id <> p_pedido);
 end $$;
 
 create or replace function public.crear_domicilio(
@@ -723,6 +764,7 @@ begin
   if v_pedido.tipo = 'domicilio' then
     update pedido_items set estado = 'cocina' where pedido_id = p_pedido and estado = 'nuevo';
   end if;
+  perform soltar_mesa(p_pedido);
   return v_total;
 end $$;
 
@@ -880,6 +922,7 @@ begin
   update pedidos set estado = 'anulado', cerrado = coalesce(cerrado, now()),
     motivo_anulacion = coalesce(trim(p_motivo), '')
   where id = p_pedido;
+  perform soltar_mesa(p_pedido);
 end $$;
 
 -- Entrada (compra) o salida (daño, pérdida) de un insumo. Una entrada con costo promedia el costo.
@@ -1007,7 +1050,7 @@ declare
   f text;
 begin
   foreach f in array array['rol_actual()', 'exigir_rol(text[])', 'reclamar_admin(text)', 'lista_equipo()',
-    'abrir_mesa(uuid)', 'crear_domicilio(text, text, text, integer, uuid, text)', 'asignar_domiciliario(uuid, uuid)',
+    'abrir_mesa(uuid)', 'crear_mesa(text)', 'crear_domicilio(text, text, text, integer, uuid, text)', 'asignar_domiciliario(uuid, uuid)',
     'mi_empleado()', 'cambiar_entrega(uuid, text)', 'registrar_novedad(uuid, text)', 'registrar_recibido(uuid, integer)',
     'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid)', 'enviar_cocina(uuid)',
     'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text)',
@@ -1023,6 +1066,7 @@ end $$;
 revoke all on function public.domicilio_para_mi(uuid) from public, anon, authenticated;
 revoke all on function public.solo_mesas_si_domiciliario(uuid) from public, anon, authenticated;
 revoke all on function public.cerrar_cuenta(uuid) from public, anon, authenticated;
+revoke all on function public.soltar_mesa(uuid) from public, anon, authenticated;
 
 -- Actualizaciones en vivo para mesas, cocina y domicilios.
 -- Si una tabla ya estaba activada (por ejemplo, desde el panel de Supabase), se deja como está.

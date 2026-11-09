@@ -27,7 +27,7 @@ function comanda(p, nombre, items) {
 export async function pintar($vista, ctx) {
   const [pedidos, mesas] = await Promise.all([api.pedidosEnCocina(), api.mesas()]);
   const nombre = (p) =>
-    p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa" : `Domicilio #${p.numero_domicilio ?? p.numero} · ${p.cliente}`;
+    p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? p.mesa_nombre ?? "Mesa" : `Domicilio #${p.numero_domicilio ?? p.numero} · ${p.cliente}`;
   const preparando = pedidos
     .map((p) => ({ p, items: p.pedido_items.filter((i) => PREPARANDO.includes(i.estado)) }))
     .filter((x) => x.items.length);

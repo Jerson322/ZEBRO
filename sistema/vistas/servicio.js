@@ -64,7 +64,9 @@ export async function mesas($vista, ctx) {
   });
   $vista.innerHTML = `
     <div class="encabezado"><h1>Mesas</h1>
-      ${ctx.perfil.rol === "admin" ? `<button id="editar-mesas">Editar mesas</button>` : ""}</div>
+      <div class="botones-domicilio" style="margin:0">
+        ${ctx.perfil.rol === "admin" ? `<button id="editar-mesas">Editar mesas</button>` : ""}
+        <button class="principal" id="crear-mesa">+ Crear mesa</button></div></div>
     ${lista.length ? `<div class="mesas">${tarjetas.join("")}</div>`
       : `<p class="vacio">${ctx.perfil.rol === "admin" ? "Crea tus mesas con «Editar mesas»." : "El administrador todavía no ha creado mesas."}</p>`}`;
 
@@ -80,6 +82,18 @@ export async function mesas($vista, ctx) {
     })
   );
   document.getElementById("editar-mesas")?.addEventListener("click", () => editarMesas(lista, ctx));
+  // Mesa al momento: se crea, se abre su cuenta de una y se borra sola al cobrarla.
+  document.getElementById("crear-mesa").addEventListener("click", () => {
+    const usados = new Set(lista.map((m) => m.nombre.trim().toLowerCase()));
+    let n = lista.length + 1;
+    while (usados.has(`mesa ${n}`)) n += 1;
+    let creada = null;
+    formulario("Crear mesa", `
+      <label>Nombre<input name="nombre" value="Mesa ${n}" autocomplete="off"></label>
+      <p class="suave" style="margin:0">Puede ser un número o el nombre del cliente. Se borra sola cuando se cobre su cuenta.</p>`,
+      async (c) => { creada = await api.crearMesa(c.nombre.trim()); },
+      { boton: "Crear y tomar pedido", alTerminar: () => ctx.ir(`pedido/${creada}`) });
+  });
 }
 
 function editarMesas(lista, ctx) {
@@ -235,7 +249,7 @@ export async function cuenta($vista, ctx, pedidoId) {
   }
   const rol = ctx.perfil.rol;
   const titulo = p.tipo === "mesa"
-    ? listaMesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa"
+    ? listaMesas.find((m) => m.id === p.mesa_id)?.nombre ?? p.mesa_nombre ?? "Mesa"
     : `Domicilio #${p.numero_domicilio ?? p.numero}`;
   const abierta = p.estado === "abierto";
   const items = [...p.pedido_items].sort((a, b) => a.creado.localeCompare(b.creado));

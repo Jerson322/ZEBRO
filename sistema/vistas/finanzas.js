@@ -22,7 +22,7 @@ export async function pintar($vista, ctx) {
   const ventas = suma(pagados, (p) => p.total);
   const costo = suma(pagados, (p) => p.costo);
   const totalGastos = suma(gastos, (g) => g.valor);
-  const nombre = (p) => (p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa" : `Domicilio #${p.numero_domicilio ?? p.numero} · ${p.cliente}`);
+  const nombre = (p) => (p.tipo === "mesa" ? p.mesa_nombre ?? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? "Mesa" : `Domicilio #${p.numero_domicilio ?? p.numero} · ${p.cliente}`);
 
   // Cuentas cobradas por partes: cada pago suma en su método. Las de antes (sin pagos) van completas.
   const pagos = pagados.flatMap((p) => (p.pagos?.length ? p.pagos : [{ metodo: p.metodo_pago, valor: p.total + p.propina }]));
