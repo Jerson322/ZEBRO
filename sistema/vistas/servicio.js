@@ -68,7 +68,7 @@ export async function mesas($vista, ctx) {
         ${ctx.perfil.rol === "admin" ? `<button id="editar-mesas">Editar mesas</button>` : ""}
         <button class="principal" id="crear-mesa">+ Crear mesa</button></div></div>
     ${lista.length ? `<div class="mesas">${tarjetas.join("")}</div>`
-      : `<p class="vacio">${ctx.perfil.rol === "admin" ? "Crea tus mesas con «Editar mesas»." : "El administrador todavía no ha creado mesas."}</p>`}`;
+      : `<p class="vacio">No hay mesas abiertas. Toca «+ Crear mesa» para tomar un pedido${ctx.perfil.rol === "admin" ? ", o crea las mesas fijas del local con «Editar mesas»" : ""}.</p>`}`;
 
   $vista.querySelectorAll("[data-mesa]").forEach(($b) =>
     $b.addEventListener("click", async () => {
