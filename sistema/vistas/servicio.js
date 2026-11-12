@@ -455,126 +455,129 @@ function tocarPlato(ctx, pedidoId, $boton) {
   }, ESPERA_TOQUES_MS);
 }
 
-// Plato con modificadores (sabores, borde, adiciones…): ventana para elegirlos. Con cantidad 2 o
-// más, cada unidad tiene sus propias opciones (ej. 2 personales: una Hawaiana y otra Criolla).
-// Las unidades iguales se agregan juntas («2×»); las distintas, en líneas separadas.
+// Plato con modificadores (sabores, borde, adiciones…): ventana para elegirlos, organizada por
+// grupos. Cada grupo tiene su cantidad (se escribe o con + / −) y sus opciones: «40 Hawaiana» es
+// un solo grupo; «38 Hawaiana + 2 Criolla con borde» son dos. Cada grupo se agrega como una línea.
 function elegirPlato(ctx, pedidoId, platoId) {
   const { platos, grupos, opciones: todas, platoGrupos } = ctx.menu;
   const plato = platos.find((pl) => pl.id === platoId);
   const susGrupos = grupos.filter((g) => platoGrupos.some((pg) => pg.plato_id === platoId && pg.grupo_id === g.id));
   if (!susGrupos.length) return;
   const opcionesDe = (g) => todas.filter((o) => o.grupo_id === g.id);
-  // Lo elegido en cada unidad: { opciones: Set(id), nota }.
-  const unidades = [{ opciones: new Set(), nota: "" }];
+  const nuevaVariante = () => ({ cantidad: 1, opciones: new Set(), nota: "" });
+  const variantes = [nuevaVariante()];
   const abiertos = new Set(); // adiciones desplegadas, para que no se cierren al volver a pintar
-  const precioUnidad = (u) => plato.precio + todas.filter((o) => u.opciones.has(o.id)).reduce((s, o) => s + o.precio, 0);
+  const precioUnidad = (v) => plato.precio + todas.filter((o) => v.opciones.has(o.id)).reduce((s, o) => s + o.precio, 0);
+  const cantidad = (v) => Math.max(1, Math.min(999, Math.round(Number(v.cantidad) || 1)));
 
-  const bloque = (u, k) => {
+  const bloque = (v, k) => {
     const grupos = susGrupos.map((g) => {
       const tipo = g.maximo === 1 ? "radio" : "checkbox";
       const regla = `${g.obligatorio ? "Obligatorio" : "Opcional"}${g.maximo > 1 ? ` · hasta ${g.maximo}` : ""}`;
       const ops = opcionesDe(g);
       // En los grupos opcionales de una sola opción (Borde, Extra queso…) se puede elegir «Sin …».
       const ninguna = tipo === "radio" && !g.obligatorio
-        ? `<label class="opcion"><input type="radio" name="u${k}-g-${g.id}" value="" data-unidad="${k}" data-grupo="${g.id}"${ops.some((o) => u.opciones.has(o.id)) ? "" : " checked"}>
+        ? `<label class="opcion"><input type="radio" name="v${k}-g-${g.id}" value="" data-variante="${k}" data-grupo="${g.id}"${ops.some((o) => v.opciones.has(o.id)) ? "" : " checked"}>
             Sin ${esc(g.nombre.toLowerCase())}</label>` : "";
       const items = ninguna + ops.map((o) => `<label class="opcion">
-          <input type="${tipo}" name="u${k}-g-${g.id}" value="${o.id}" data-unidad="${k}" data-grupo="${g.id}"${u.opciones.has(o.id) ? " checked" : ""}>
+          <input type="${tipo}" name="v${k}-g-${g.id}" value="${o.id}" data-variante="${k}" data-grupo="${g.id}"${v.opciones.has(o.id) ? " checked" : ""}>
           ${esc(o.nombre)}${o.precio ? ` <span class="suave">+${pesos(o.precio)}</span>` : ""}</label>`).join("");
-      // Las adiciones (opcionales, de varias) van plegadas para que cada unidad quede corta.
+      // Las adiciones (opcionales, de varias) van plegadas para que cada grupo quede corto.
       if (!g.obligatorio && g.maximo > 1) {
-        const n = ops.filter((o) => u.opciones.has(o.id)).length;
+        const n = ops.filter((o) => v.opciones.has(o.id)).length;
         return `<details data-plegable="${k}-${g.id}"${abiertos.has(`${k}-${g.id}`) ? " open" : ""}>
           <summary><strong>${esc(g.nombre)}</strong> <small class="suave">${n ? `${n} elegida${n > 1 ? "s" : ""}` : "opcional · toca para ver"}</small></summary>
           <fieldset style="margin-top:6px">${items}</fieldset></details>`;
       }
       return `<fieldset><legend>${esc(g.nombre)} <small class="suave">${regla}</small></legend>${items}</fieldset>`;
     }).join("");
-    return `<div class="${unidades.length > 1 ? "panel" : ""}" style="margin:0;display:flex;flex-direction:column;gap:10px">
-      ${unidades.length > 1 ? `<div class="mc-titulo"><span>${esc(plato.nombre)} ${k + 1}</span>
-        <span class="suave">${pesos(precioUnidad(u))}</span></div>` : ""}
+    return `<div class="${variantes.length > 1 ? "panel" : ""}" style="margin:0;display:flex;flex-direction:column;gap:10px">
+      <div class="mc-titulo" style="align-items:center">
+        <span class="botones-domicilio" style="justify-content:flex-start;margin:0;align-items:center">
+          <button type="button" class="chico" data-menos="${k}" aria-label="Una menos">−</button>
+          <input type="number" min="1" max="999" inputmode="numeric" data-cantidad="${k}" value="${cantidad(v)}"
+            aria-label="Cantidad" style="width:76px;text-align:center;font-size:18px;font-weight:800;min-height:38px">
+          <button type="button" class="chico" data-mas="${k}" aria-label="Una más">+</button>
+          <span class="suave">× ${pesos(precioUnidad(v))}</span>
+        </span>
+        ${variantes.length > 1 ? `<button type="button" class="icono-boton" data-quitar-variante="${k}" aria-label="Quitar este grupo">✕</button>` : ""}
+      </div>
       ${grupos}
-      <label>Nota${unidades.length > 1 ? ` de la ${k + 1}` : ""}<input data-nota="${k}" value="${esc(u.nota)}" placeholder="Ej. sin cebolla"></label>
+      <label>Nota<input data-nota="${k}" value="${esc(v.nota)}" placeholder="Ej. sin cebolla"></label>
     </div>`;
   };
 
   const $form = formulario(esc(plato.nombre), `
-    <div class="fila" style="align-items:end">
-      <label>Cantidad
-        <span class="botones-domicilio" style="justify-content:flex-start;margin:0">
-          <button type="button" class="chico" id="menos" aria-label="Una menos">−</button>
-          <strong id="cantidad" style="min-width:28px;text-align:center;font-size:18px">1</strong>
-          <button type="button" class="chico" id="mas" aria-label="Una más">+</button>
-        </span></label>
-      <button type="button" class="chico" id="copiar" hidden>Copiar las opciones de la 1 a todas</button>
-    </div>
-    <div id="unidades" style="display:flex;flex-direction:column;gap:12px"></div>
-    <div class="total"><span>Total</span><span id="total-plato"></span></div>`,
+    <div id="variantes" style="display:flex;flex-direction:column;gap:12px"></div>
+    <button type="button" id="otra-variante">+ Agregar otras con opciones distintas</button>
+    <div class="total"><span id="unidades-plato">Total</span><span id="total-plato"></span></div>`,
     async () => {
-      // Cada unidad debe cumplir las reglas de sus grupos; se avisa cuál está incompleta.
-      unidades.forEach((u, k) => {
+      // Cada grupo debe cumplir las reglas de sus opciones; se avisa cuál está incompleto.
+      variantes.forEach((v, k) => {
         for (const g of susGrupos) {
-          const n = opcionesDe(g).filter((o) => u.opciones.has(o.id)).length;
-          const cual = unidades.length > 1 ? ` (${plato.nombre} ${k + 1})` : "";
+          const n = opcionesDe(g).filter((o) => v.opciones.has(o.id)).length;
+          const cual = variantes.length > 1 ? ` (grupo ${k + 1})` : "";
           if (g.obligatorio && !n) throw new Error(`Elige ${g.nombre}${cual}`);
           if (n > g.maximo) throw new Error(`En ${g.nombre} puedes elegir máximo ${g.maximo}${cual}`);
         }
       });
-      // Las unidades iguales se agregan juntas.
-      const juntas = new Map();
-      for (const u of unidades) {
-        const opciones = [...u.opciones].sort();
-        const clave = JSON.stringify([opciones, u.nota.trim()]);
-        const grupo = juntas.get(clave) ?? { opciones, nota: u.nota.trim(), cantidad: 0 };
-        grupo.cantidad += 1;
-        juntas.set(clave, grupo);
-      }
-      for (const g of juntas.values()) await api.agregarItem(pedidoId, platoId, g.cantidad, g.opciones, g.nota);
+      // Los grupos iguales se agregan juntos (la base de datos también los suma).
+      for (const v of variantes) await api.agregarItem(pedidoId, platoId, cantidad(v), [...v.opciones].sort(), v.nota.trim());
     },
     { boton: "Agregar", alTerminar: () => ctx.refrescar() });
 
-  const $unidades = $form.querySelector("#unidades");
-  const pintar = () => {
-    $unidades.innerHTML = unidades.map(bloque).join("");
-    $form.querySelector("#cantidad").textContent = unidades.length;
-    $form.querySelector("#copiar").hidden = unidades.length < 2;
-    $form.querySelector("#total-plato").textContent = pesos(unidades.reduce((s, u) => s + precioUnidad(u), 0));
-    $form.querySelector('[type="submit"]').textContent = unidades.length > 1 ? `Agregar ${unidades.length}` : "Agregar";
+  const $dialogo = document.getElementById("dialogo");
+  const $variantes = $form.querySelector("#variantes");
+  // Totales sin volver a pintar (para no perder lo que se está escribiendo).
+  const totales = () => {
+    const n = variantes.reduce((s, v) => s + cantidad(v), 0);
+    $form.querySelector("#unidades-plato").textContent = `Total · ${n} ${n === 1 ? "unidad" : "unidades"}`;
+    $form.querySelector("#total-plato").textContent = pesos(variantes.reduce((s, v) => s + cantidad(v) * precioUnidad(v), 0));
+    $form.querySelector('[type="submit"]').textContent = n > 1 ? `Agregar ${n}` : "Agregar";
   };
-  $unidades.addEventListener("change", (e) => {
-    const $i = e.target;
-    if ($i.dataset.nota !== undefined) return;
-    const u = unidades[Number($i.dataset.unidad)];
-    if (!u) return;
-    if ($i.type === "radio") {
-      // Elegir uno en un grupo de «elegir 1» quita el anterior de ese grupo.
-      opcionesDe({ id: $i.dataset.grupo }).forEach((o) => u.opciones.delete(o.id));
-    }
-    if ($i.checked && $i.value) u.opciones.add($i.value);
-    else if ($i.value) u.opciones.delete($i.value);
+  // Vuelve a pintar sin mover la ventana (antes saltaba hacia abajo).
+  const pintar = () => {
+    const scroll = $dialogo.scrollTop;
+    $variantes.innerHTML = variantes.map(bloque).join("");
+    $dialogo.scrollTop = scroll;
+    totales();
+  };
+  $variantes.addEventListener("click", (e) => {
+    const $b = e.target.closest("button");
+    if (!$b) return;
+    if ($b.dataset.mas !== undefined) variantes[$b.dataset.mas].cantidad = cantidad(variantes[$b.dataset.mas]) + 1;
+    else if ($b.dataset.menos !== undefined) variantes[$b.dataset.menos].cantidad = Math.max(1, cantidad(variantes[$b.dataset.menos]) - 1);
+    else if ($b.dataset.quitarVariante !== undefined) variantes.splice(Number($b.dataset.quitarVariante), 1);
+    else return;
     pintar();
   });
-  $unidades.addEventListener("toggle", (e) => {
+  $variantes.addEventListener("change", (e) => {
+    const $i = e.target;
+    if ($i.dataset.cantidad !== undefined) {
+      variantes[$i.dataset.cantidad].cantidad = cantidad({ cantidad: $i.value });
+      $i.value = variantes[$i.dataset.cantidad].cantidad;
+      return totales();
+    }
+    if ($i.dataset.variante === undefined) return;
+    const v = variantes[Number($i.dataset.variante)];
+    if ($i.type === "radio") opcionesDe({ id: $i.dataset.grupo }).forEach((o) => v.opciones.delete(o.id));
+    if ($i.checked && $i.value) v.opciones.add($i.value);
+    else if ($i.value) v.opciones.delete($i.value);
+    pintar();
+  });
+  $variantes.addEventListener("input", (e) => {
+    if (e.target.dataset.nota !== undefined) variantes[Number(e.target.dataset.nota)].nota = e.target.value;
+    if (e.target.dataset.cantidad !== undefined && e.target.value !== "") {
+      variantes[e.target.dataset.cantidad].cantidad = e.target.value;
+      totales();
+    }
+  });
+  $variantes.addEventListener("toggle", (e) => {
     const clave = e.target.dataset?.plegable;
     if (clave) e.target.open ? abiertos.add(clave) : abiertos.delete(clave);
   }, true);
-  $unidades.addEventListener("input", (e) => {
-    if (e.target.dataset.nota !== undefined) unidades[Number(e.target.dataset.nota)].nota = e.target.value;
-  });
-  $form.querySelector("#mas").addEventListener("click", () => {
-    unidades.push({ opciones: new Set(), nota: "" });
-    pintar();
-    $unidades.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  });
-  $form.querySelector("#menos").addEventListener("click", () => {
-    if (unidades.length > 1) unidades.pop();
-    pintar();
-  });
-  $form.querySelector("#copiar").addEventListener("click", () => {
-    for (const u of unidades.slice(1)) {
-      u.opciones = new Set(unidades[0].opciones);
-      u.nota = unidades[0].nota;
-    }
+  $form.querySelector("#otra-variante").addEventListener("click", () => {
+    variantes.push(nuevaVariante());
     pintar();
   });
   pintar();
