@@ -331,6 +331,32 @@
     dialog .botones { margin-top: 4px; }
     dialog .botones button { min-width: 120px; }
 
+    /* Contador de efectivo (apertura y cierre de caja): billetes y monedas de Colombia */
+    .contador-efectivo { display: flex; flex-direction: column; gap: 14px; }
+    .denom-grupo { display: flex; flex-direction: column; gap: 8px; }
+    .denoms { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+    .denom { display: flex; flex-direction: column; gap: 4px; }
+    .denom-cara {
+      position: relative; min-height: 62px; border-radius: 10px; font-size: 17px; font-weight: 800; color: #1f2430;
+      border: 2px solid rgba(0, 0, 0, 0.08); box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.35), var(--sombra); user-select: none;
+    }
+    .denom-cara.moneda { border-radius: 999px; min-height: 58px; background: radial-gradient(circle at 35% 30%, #f4f5f7, #c6c9cf); }
+    .denom-cara.moneda[data-sumar="500"], .denom-cara.moneda[data-sumar="1000"] { background: radial-gradient(circle at 35% 30%, #fbefc4, #d9b85a); }
+    .b100000 { background: linear-gradient(135deg, #f3d4c8, #d98f78); }
+    .b50000 { background: linear-gradient(135deg, #e6d6ef, #b691c9); }
+    .b20000 { background: linear-gradient(135deg, #fbe7c2, #e8b55c); }
+    .b10000 { background: linear-gradient(135deg, #f6d2d6, #d9808b); }
+    .b5000 { background: linear-gradient(135deg, #f0e3c9, #c9a46a); }
+    .b2000 { background: linear-gradient(135deg, #d6e8f4, #86b4d4); }
+    .denom-n {
+      position: absolute; top: -9px; right: -7px; min-width: 30px; padding: 2px 8px; border-radius: 999px;
+      background: var(--acento); color: #fff; font-size: 14px; box-shadow: var(--sombra);
+    }
+    .denom.con-cantidad .denom-cara { border-color: var(--acento); }
+    .denom-pie { display: flex; justify-content: space-between; align-items: center; min-height: 32px; }
+    .denom-menos { min-height: 30px; padding: 2px 12px; font-size: 18px; }
+    p.positivo { color: var(--positivo); }
+
     /* Multicuenta: repartir los productos entre varias cuentas arrastrándolos */
     @media (min-width: 761px) { dialog.ancho { width: min(1100px, calc(100vw - 32px)); } }
     .mc-cabeza { display: flex; justify-content: space-between; align-items: center; gap: 12px; }

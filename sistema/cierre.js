@@ -1,13 +1,21 @@
-// Cierre de caja del día: resumen de lo vendido, el dinero por método, los gastos y el efectivo
-// que debe haber en caja. Se ve en pantalla, se anota el efectivo contado y se imprime el ticket.
+// Cierre de caja: lo vendido, el dinero por método, los gastos y el efectivo que debe haber en
+// caja (base de la apertura + ventas en efectivo − gastos en efectivo). El efectivo se cuenta con
+// los billetes y monedas, se guarda el cierre y se imprime el ticket.
 import * as api from "./api.js";
 import { esc, pesos, mostrar, cerrarDialogo, hoy, aviso } from "./util.js";
 import { imprimir } from "./impresion.js";
+import { contadorEfectivo, detalleConteo } from "./caja.js";
 
 const suma = (lista, f) => lista.reduce((s, x) => s + Number(f(x) || 0), 0);
+const fechaHora = (iso) => new Date(iso).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" });
 
-export async function calcularCierre(dia = hoy()) {
-  const [cerrados, gastos, abiertos] = await Promise.all([api.pedidosCerrados(dia, dia), api.gastos(dia, dia), api.pedidosAbiertos()]);
+// Desde la apertura de la caja (o desde el comienzo del día, si no se abrió) hasta ahora.
+export async function calcularCierre(caja = null) {
+  const desde = caja?.abierta_en ?? new Date(`${hoy()}T00:00:00`).toISOString();
+  const [cerradosTodos, gastos, abiertos] = await Promise.all([
+    api.pedidosCerrados(hoy(new Date(desde)), hoy()), api.gastos(hoy(new Date(desde)), hoy()), api.pedidosAbiertos(),
+  ]);
+  const cerrados = cerradosTodos.filter((p) => new Date(p.cerrado) >= new Date(desde));
   const pagados = cerrados.filter((p) => p.estado === "pagado");
   const anulados = cerrados.filter((p) => p.estado === "anulado");
   const pagos = pagados.flatMap((p) => (p.pagos?.length ? p.pagos : [{ metodo: p.metodo_pago, valor: p.total + (p.propina || 0) }]));
@@ -25,10 +33,13 @@ export async function calcularCierre(dia = hoy()) {
     f.valor += i.precio * i.cantidad;
     productos.set(i.nombre, f);
   }
+  const base = caja?.base ?? 0;
   const gastosEfectivo = suma(gastos.filter((g) => g.metodo === "Efectivo"), (g) => g.valor);
   const ventasEfectivo = metodos.find((m) => m.metodo === "Efectivo")?.valor ?? 0;
   return {
-    dia,
+    desde,
+    caja,
+    base,
     ventas: suma(pagados, (p) => p.total),
     cuentas: pagados.length,
     envios: suma(pagados, (p) => p.envio),
@@ -40,20 +51,20 @@ export async function calcularCierre(dia = hoy()) {
     gastosLista: gastos,
     gastosEfectivo,
     ventasEfectivo,
-    efectivoEsperado: ventasEfectivo - gastosEfectivo,
+    efectivoEsperado: base + ventasEfectivo - gastosEfectivo,
     abiertas: abiertos.length,
   };
 }
 
-// Ticket del cierre para la comandera.
-export function ticketCierre(c, negocio, { usuario, contado } = {}) {
+// Ticket del cierre para la comandera. corte = se imprime sin cerrar la caja.
+export function ticketCierre(c, negocio, { usuario, contado, conteo, corte = false } = {}) {
   const fila = (izq, der, clase = "") => `<div class="t-fila ${clase}"><span>${izq}</span><span>${der}</span></div>`;
   const diferencia = contado != null ? contado - c.efectivoEsperado : null;
-  const fecha = new Date(`${c.dia}T12:00:00`).toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const detalle = detalleConteo(conteo);
   return `<div class="ticket">
     <div class="t-centro t-negocio">${esc(negocio?.nombre ?? "")}</div>
-    <div class="t-centro t-negocio">CIERRE DE CAJA</div>
-    <div class="t-centro">${esc(fecha)}</div>
+    <div class="t-centro t-negocio">${corte ? "CORTE DE CAJA" : "CIERRE DE CAJA"}</div>
+    <div class="t-centro">${c.caja ? `Abierta ${esc(fechaHora(c.desde))}` : `Desde ${esc(fechaHora(c.desde))}`}</div>
     <div class="t-centro t-chico">Impreso ${new Date().toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })}${usuario ? ` · ${esc(usuario)}` : ""}</div>
     <hr>
     ${fila("Cuentas cobradas", c.cuentas)}
@@ -65,15 +76,17 @@ export function ticketCierre(c, negocio, { usuario, contado } = {}) {
     <div><strong>DINERO POR MÉTODO</strong></div>
     ${c.metodos.length ? c.metodos.map((m) => fila(`${esc(m.metodo)} (${m.pagos})`, pesos(m.valor))).join("") : "<div>Sin pagos</div>"}
     <hr>
-    <div><strong>GASTOS DEL DÍA</strong></div>
+    <div><strong>GASTOS</strong></div>
     ${c.gastosLista.length ? c.gastosLista.map((g) => fila(esc(`${g.categoria}${g.descripcion ? ` · ${g.descripcion}` : ""}`).slice(0, 34), pesos(g.valor))).join("") : "<div>Sin gastos</div>"}
     ${fila("Total gastos", pesos(c.gastos), "t-total")}
     <hr>
     <div><strong>EFECTIVO EN CAJA</strong></div>
-    ${fila("Ventas en efectivo", pesos(c.ventasEfectivo))}
+    ${fila("Base de apertura", pesos(c.base))}
+    ${fila("+ Ventas en efectivo", pesos(c.ventasEfectivo))}
     ${fila("− Gastos en efectivo", pesos(c.gastosEfectivo))}
     ${fila("Debe haber", pesos(c.efectivoEsperado), "t-total")}
     ${contado != null ? fila("Contado", pesos(contado)) + fila(diferencia === 0 ? "Cuadra" : diferencia > 0 ? "Sobra" : "Falta", pesos(Math.abs(diferencia)), "t-total") : ""}
+    ${detalle.length ? `<div class="t-chico">${detalle.map((x) => fila(`${x.cantidad} × ${pesos(x.denominacion)}`, pesos(x.valor))).join("")}</div>` : ""}
     <hr>
     <div><strong>PRODUCTOS VENDIDOS</strong></div>
     ${c.productos.length ? c.productos.map((p) => fila(`${p.cantidad} × ${esc(p.nombre)}`, pesos(p.valor))).join("") : "<div>Ninguno</div>"}
@@ -83,19 +96,23 @@ export function ticketCierre(c, negocio, { usuario, contado } = {}) {
   </div>`;
 }
 
-// Ventana del cierre: resumen en pantalla, efectivo contado y botón para imprimir.
-// conSalida: al terminar se cierra la sesión (cuando se llega desde «Salir»).
+// Ventana del cierre: resumen, conteo del efectivo con billetes y monedas, y dos opciones:
+// «Corte» (imprime sin cerrar la caja) o «Cerrar caja» (guarda el cierre e imprime).
+// conSalida: al terminar el cierre se cierra la sesión (cuando se llega desde «Salir»).
 export async function abrirCierre(ctx, { conSalida = false, salir } = {}) {
   let c;
   try {
-    c = await calcularCierre();
+    c = await calcularCierre(await api.cajaAbierta());
   } catch (error) {
     aviso(error.message);
     return;
   }
+  let contado = 0;
+  let conteo = {};
   const fila = (izq, der, fuerte = false) => `<div class="item"><span>${izq}</span><span class="num">${fuerte ? `<strong>${der}</strong>` : der}</span></div>`;
   const $c = mostrar(`
-    <h2>Cierre de caja · hoy</h2>
+    <h2>Cierre de caja</h2>
+    <p class="suave" style="margin:0">${c.caja ? `Caja abierta el ${esc(fechaHora(c.desde))} con ${pesos(c.base)}.` : "La caja no se abrió: se toma desde el comienzo del día, con base $0."}</p>
     ${c.abiertas ? `<p class="error" style="margin:0">Hay ${c.abiertas} cuenta(s) abiertas sin cobrar. Puedes cerrar igual, pero no entran en el cierre.</p>` : ""}
     <div class="tarjetas" style="margin:0">
       <div class="tarjeta"><small>Ventas (${c.cuentas})</small><strong>${pesos(c.ventas)}</strong></div>
@@ -103,34 +120,62 @@ export async function abrirCierre(ctx, { conSalida = false, salir } = {}) {
     </div>
     <div>
       <strong>Dinero por método</strong>
-      ${c.metodos.length ? c.metodos.map((m) => fila(`${esc(m.metodo)} <small class="suave">(${m.pagos} pagos)</small>`, pesos(m.valor))).join("") : `<p class="suave" style="margin:4px 0">Sin pagos hoy.</p>`}
+      ${c.metodos.length ? c.metodos.map((m) => fila(`${esc(m.metodo)} <small class="suave">(${m.pagos} pagos)</small>`, pesos(m.valor))).join("") : `<p class="suave" style="margin:4px 0">Sin pagos.</p>`}
     </div>
     <div>
       <strong>Efectivo en caja</strong>
-      ${fila("Ventas en efectivo", pesos(c.ventasEfectivo))}
+      ${fila("Base de apertura", pesos(c.base))}
+      ${fila("+ Ventas en efectivo", pesos(c.ventasEfectivo))}
       ${fila("− Gastos pagados en efectivo", pesos(c.gastosEfectivo))}
       ${fila("Debe haber", pesos(c.efectivoEsperado), true)}
     </div>
-    <label>Efectivo contado en caja (opcional)<input id="contado" type="number" min="0" step="100" placeholder="Cuenta los billetes y escribe el total"></label>
-    <p id="diferencia" style="margin:0"></p>
+    <div><strong>Cuenta el efectivo de la caja</strong>
+      <p class="suave" style="margin:2px 0 8px">Toca cada billete o moneda las veces que lo tengas.</p>
+      <div id="contador-cierre" class="contador-efectivo"></div></div>
+    <p id="diferencia" style="margin:0;font-weight:700"></p>
     <div class="botones">
       <button type="button" id="cancelar-cierre">Cancelar</button>
-      <button type="button" class="principal" id="imprimir-cierre">${conSalida ? "Imprimir cierre y salir" : "Imprimir cierre"}</button>
+      <button type="button" id="corte-cierre">Imprimir corte<br><small class="suave">sin cerrar la caja</small></button>
+      <button type="button" class="principal" id="imprimir-cierre">${conSalida ? "Cerrar caja y salir" : "Cerrar caja"}</button>
     </div>`);
-  const $contado = $c.querySelector("#contado");
+  const $dialogo = document.getElementById("dialogo");
+  $dialogo.classList.add("ancho");
+  $dialogo.addEventListener("close", () => $dialogo.classList.remove("ancho"), { once: true });
   const $diferencia = $c.querySelector("#diferencia");
-  $contado.addEventListener("input", () => {
-    if ($contado.value === "") return ($diferencia.textContent = "");
-    const d = Number($contado.value) - c.efectivoEsperado;
-    $diferencia.className = d === 0 ? "" : d > 0 ? "suave" : "error";
+  contadorEfectivo($c.querySelector("#contador-cierre"), (total, nuevo) => {
+    contado = total;
+    conteo = nuevo;
+    if (!total) return ($diferencia.textContent = "");
+    const d = total - c.efectivoEsperado;
+    $diferencia.className = d === 0 ? "positivo" : d > 0 ? "suave" : "error";
     $diferencia.textContent = d === 0 ? "✓ La caja cuadra" : d > 0 ? `Sobran ${pesos(d)}` : `Faltan ${pesos(-d)}`;
   });
+  const contadoFinal = () => (contado || Object.keys(conteo).length ? contado : null);
   $c.querySelector("#cancelar-cierre").addEventListener("click", cerrarDialogo);
-  $c.querySelector("#imprimir-cierre").addEventListener("click", async () => {
-    const contado = $contado.value === "" ? null : Number($contado.value);
+  $c.querySelector("#corte-cierre").addEventListener("click", async () => {
     cerrarDialogo();
-    await imprimir(ticketCierre(c, ctx.negocio, { usuario: ctx.perfil.nombre, contado }));
-    aviso("Cierre de caja impreso");
+    await imprimir(ticketCierre(c, ctx.negocio, { usuario: ctx.perfil.nombre, contado: contadoFinal(), conteo, corte: true }));
+    aviso("Corte de caja impreso (la caja sigue abierta)");
+  });
+  $c.querySelector("#imprimir-cierre").addEventListener("click", async (evento) => {
+    const final = contadoFinal();
+    if (final == null && !confirm("No contaste el efectivo. ¿Cerrar la caja igual?")) return;
+    evento.currentTarget.disabled = true;
+    try {
+      await api.cerrarCaja(final, conteo, c.efectivoEsperado, {
+        ventas: c.ventas, cuentas: c.cuentas, gastos: c.gastos, base: c.base,
+        ventas_efectivo: c.ventasEfectivo, gastos_efectivo: c.gastosEfectivo, metodos: c.metodos,
+      });
+    } catch (error) {
+      aviso(error.message);
+      evento.currentTarget.disabled = false;
+      return;
+    }
+    ctx.caja = null;
+    cerrarDialogo();
+    await imprimir(ticketCierre(c, ctx.negocio, { usuario: ctx.perfil.nombre, contado: final, conteo }));
+    aviso("Caja cerrada");
     if (conSalida) await salir();
+    else ctx.refrescar();
   });
 }

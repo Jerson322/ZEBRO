@@ -11,6 +11,7 @@ import * as ajustes from "./vistas/ajustes.js";
 import { preferencia, guardarPreferencia, imprimirAqui, ticketComanda } from "./impresion.js";
 import { iconos } from "./iconos.js";
 import { abrirCierre } from "./cierre.js";
+import { revisarApertura } from "./caja.js";
 
 const SECCIONES = [
   { id: "mesas", nombre: "Mesas", vista: servicio.mesas, roles: ["admin", "cajero", "mesero", "domiciliario"], enVivo: true },
@@ -243,6 +244,9 @@ async function entrar({ bienvenida = false } = {}) {
     revisarComandas = setInterval(imprimirComandasPendientes, REVISAR_COMANDAS_CADA_MS);
     imprimirComandasPendientes();
     await pintar();
+    // Si no hay caja abierta, la caja (admin o cajero) la abre contando la base. Después de la
+    // bienvenida, para no taparla.
+    setTimeout(() => revisarApertura(ctx), bienvenida ? 3200 : 300);
   } catch (error) {
     pantallaError(error.message || "No pudimos cargar el sistema. Revisa tu conexión.");
   }
@@ -292,7 +296,7 @@ function elegirSalida() {
   if (!["admin", "cajero"].includes(ctx.perfil?.rol)) return salir();
   const $c = mostrar(`<h2>¿Cómo quieres salir?</h2>
     <button type="button" class="principal" id="salida-cierre">Cerrar caja del día</button>
-    <p class="suave" style="margin:-6px 0 0">Imprime el resumen de lo vendido, el dinero por método, los gastos y el efectivo que debe haber en caja.</p>
+    <p class="suave" style="margin:-6px 0 0">Cuentas el efectivo con los billetes y monedas, se guarda el cierre y se imprime el resumen: lo vendido, el dinero por método, los gastos y si la caja cuadra.</p>
     <button type="button" id="salida-sesion">Solo cerrar sesión</button>
     <button type="button" id="salida-cancelar">Cancelar</button>`);
   $c.querySelector("#salida-cierre").addEventListener("click", () => abrirCierre(ctx, { conSalida: true, salir }));

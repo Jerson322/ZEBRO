@@ -4,6 +4,7 @@ import * as api from "../api.js";
 import { esc, pesos, opciones, tabla, tarjeta, formulario, hoy, hora, fechaCorta, aviso } from "../util.js";
 import { exportarVentasYGastos } from "../excel.js";
 import { abrirCierre } from "../cierre.js";
+import { abrirCaja } from "../caja.js";
 import { autorizar } from "../clave.js";
 
 const CATEGORIAS_GASTO = ["Mercado", "Arriendo", "Servicios", "Nómina", "Transporte", "Publicidad", "Mantenimiento", "Impuestos", "Otros"];
@@ -13,10 +14,11 @@ const periodo = { desde: hoy(), hasta: hoy() };
 
 export async function pintar($vista, ctx) {
   const admin = ctx.perfil.rol === "admin";
-  const [cerrados, gastos, mesas] = await Promise.all([
+  const [cerrados, gastos, mesas, caja] = await Promise.all([
     api.pedidosCerrados(periodo.desde, periodo.hasta),
     api.gastos(periodo.desde, periodo.hasta),
     api.mesas(),
+    api.cajaAbierta().catch(() => null),
   ]);
   const pagados = cerrados.filter((p) => p.estado === "pagado");
   const suma = (lista, f) => lista.reduce((s, x) => s + Number(f(x) || 0), 0);
@@ -40,8 +42,13 @@ export async function pintar($vista, ctx) {
 
   $vista.innerHTML = `
     <div class="encabezado"><h1>Ventas y gastos</h1>
-      <div class="botones-domicilio" style="margin:0"><button id="cierre-caja">Cierre de caja</button>
+      <div class="botones-domicilio" style="margin:0">
+        ${caja ? "" : `<button id="abrir-caja">Abrir caja</button>`}
+        <button id="cierre-caja">Cierre de caja</button>
         <button class="principal" id="nuevo-gasto">Registrar gasto</button></div></div>
+    <p class="suave" style="margin:-8px 0 16px">${caja
+      ? `🟢 Caja abierta desde el ${new Date(caja.abierta_en).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })} con base ${pesos(caja.base)}`
+      : "⚪ La caja no está abierta. Ábrela contando la base con «Abrir caja»."}</p>
     <div class="filtros">
       <label>Desde<input type="date" data-periodo="desde" value="${periodo.desde}"></label>
       <label>Hasta<input type="date" data-periodo="hasta" value="${periodo.hasta}"></label>
@@ -81,6 +88,7 @@ export async function pintar($vista, ctx) {
     })
   );
   $vista.querySelector("#cierre-caja").addEventListener("click", () => abrirCierre(ctx));
+  $vista.querySelector("#abrir-caja")?.addEventListener("click", () => abrirCaja(ctx, { alTerminar: () => ctx.refrescar() }));
   $vista.querySelector("#exportar-excel").addEventListener("click", async (evento) => {
     const $b = evento.currentTarget;
     $b.disabled = true;

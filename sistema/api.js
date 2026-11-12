@@ -181,6 +181,11 @@ export const cobrarParte = (pedidoId, items, metodo) =>
 export const cambiarParaLlevar = (pedidoId, paraLlevar) =>
   rpc("cambiar_para_llevar", { p_pedido: pedidoId, p_para_llevar: paraLlevar });
 export const anular = (pedidoId, motivo, clave) => rpc("anular", { p_pedido: pedidoId, p_motivo: motivo, p_clave: clave || null });
+// Caja: la que está abierta (o null), abrirla con la base y cerrarla con lo contado.
+export const cajaAbierta = () => resultado(sb.from("cajas").select("*").is("cerrada_en", null).maybeSingle());
+export const abrirCaja = (base, conteo) => rpc("abrir_caja", { p_base: base, p_conteo: conteo });
+export const cerrarCaja = (contado, conteo, esperado, resumen) =>
+  rpc("cerrar_caja", { p_contado: contado, p_conteo: conteo, p_esperado: esperado, p_resumen: resumen });
 // Clave de autorización.
 export const hayClaves = () => rpc("hay_claves");
 export const verificarClave = (clave) => rpc("verificar_clave", { p_clave: clave });

@@ -1048,6 +1048,62 @@ drop policy if exists "admin cambia" on public.negocio;
 create policy "admin cambia" on public.negocio for update to authenticated
   using (rol_actual() = 'admin') with check (rol_actual() = 'admin');
 
+-- Apertura y cierre de caja: con cuánto efectivo se abre (la base) y cuánto se contó al cerrar,
+-- con el detalle por billete y moneda. Solo puede haber una caja abierta a la vez.
+create table if not exists public.cajas (
+  id uuid primary key default gen_random_uuid(),
+  abierta_en timestamptz not null default now(),
+  abierta_por uuid default auth.uid(),
+  base integer not null default 0 check (base >= 0),
+  conteo_apertura jsonb not null default '{}',
+  cerrada_en timestamptz,
+  cerrada_por uuid,
+  contado integer check (contado is null or contado >= 0),
+  conteo_cierre jsonb,
+  esperado integer,
+  resumen jsonb
+);
+create unique index if not exists una_caja_abierta on public.cajas ((true)) where cerrada_en is null;
+alter table public.cajas enable row level security;
+revoke all on public.cajas from anon;
+grant select on public.cajas to authenticated;
+grant all on public.cajas to service_role;
+drop policy if exists "caja lee" on public.cajas;
+create policy "caja lee" on public.cajas for select to authenticated using (rol_actual() in ('admin', 'cajero'));
+
+create or replace function public.abrir_caja(p_base integer, p_conteo jsonb) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_id uuid;
+begin
+  perform exigir_rol('admin', 'cajero');
+  if p_base is null or p_base < 0 then
+    raise exception 'La base no puede ser negativa';
+  end if;
+  if exists (select 1 from cajas where cerrada_en is null) then
+    raise exception 'La caja ya está abierta';
+  end if;
+  insert into cajas (base, conteo_apertura) values (p_base, coalesce(p_conteo, '{}')) returning id into v_id;
+  return v_id;
+end $$;
+
+-- Cierra la caja abierta guardando lo contado y el resumen. Si nadie la abrió, se guarda un
+-- cierre con base 0 desde el comienzo del día.
+create or replace function public.cerrar_caja(p_contado integer, p_conteo jsonb, p_esperado integer, p_resumen jsonb)
+returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform exigir_rol('admin', 'cajero');
+  update cajas set cerrada_en = now(), cerrada_por = auth.uid(), contado = p_contado,
+    conteo_cierre = p_conteo, esperado = p_esperado, resumen = p_resumen
+  where cerrada_en is null;
+  if not found then
+    insert into cajas (abierta_en, base, cerrada_en, cerrada_por, contado, conteo_cierre, esperado, resumen)
+    values (date_trunc('day', now() at time zone 'America/Bogota') at time zone 'America/Bogota', 0,
+            now(), auth.uid(), p_contado, p_conteo, p_esperado, p_resumen);
+  end if;
+end $$;
+
 -- Cola de impresión: lo que se imprime desde un celular (cuentas, tickets de pago, cierre de caja)
 -- se guarda aquí y lo imprime el computador que tiene «Comandera aquí».
 create table if not exists public.impresiones (
@@ -1136,7 +1192,8 @@ begin
     'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid, text)', 'enviar_cocina(uuid)',
     'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text, text)',
     'hay_claves()', 'verificar_clave(text)', 'poner_clave(uuid, text)',
-    'cobrar_parte(uuid, jsonb, text)', 'abonar(uuid, integer, text)', 'cambiar_para_llevar(uuid, boolean)',
+    'cobrar_parte(uuid, jsonb, text)', 'abonar(uuid, integer, text)',
+    'abrir_caja(integer, jsonb)', 'cerrar_caja(integer, jsonb, integer, jsonb)', 'cambiar_para_llevar(uuid, boolean)',
     'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()', 'impresiones_por_imprimir()',
     'asignar_numero_domicilio()'] loop
     execute format('revoke all on function public.%s from public, anon', f);
