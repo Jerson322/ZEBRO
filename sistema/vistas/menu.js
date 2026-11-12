@@ -2,6 +2,7 @@
 import * as api from "../api.js";
 import { esc, pesos, numero, opciones, tabla, formulario, aviso } from "../util.js";
 import { descargarMenu, subirMenu } from "../menu-excel.js";
+import { autorizar } from "../clave.js";
 
 let pestana = "platos";
 
@@ -91,6 +92,7 @@ export async function pintar($vista, ctx) {
   const accion = (sel, fn) => $(sel).forEach(($el) => $el.addEventListener("click", () => fn($el)));
   const borrarCon = (tabla, mensaje) => async (id) => {
     if (!confirm(mensaje)) return;
+    if ((await autorizar(ctx, mensaje)) === null) return;
     try {
       await api.borrar(tabla, id);
       await recargar();

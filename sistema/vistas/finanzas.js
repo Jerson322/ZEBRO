@@ -4,6 +4,7 @@ import * as api from "../api.js";
 import { esc, pesos, opciones, tabla, tarjeta, formulario, hoy, hora, fechaCorta, aviso } from "../util.js";
 import { exportarVentasYGastos } from "../excel.js";
 import { abrirCierre } from "../cierre.js";
+import { autorizar } from "../clave.js";
 
 const CATEGORIAS_GASTO = ["Mercado", "Arriendo", "Servicios", "Nómina", "Transporte", "Publicidad", "Mantenimiento", "Impuestos", "Otros"];
 const METODOS = ["Efectivo", "Tarjeta", "Transferencia", "Nequi", "Daviplata"];
@@ -102,6 +103,7 @@ export async function pintar($vista, ctx) {
   $vista.querySelectorAll("[data-borrar-gasto]").forEach(($b) =>
     $b.addEventListener("click", async () => {
       if (!confirm("¿Borrar este gasto?")) return;
+      if ((await autorizar(ctx, "Borrar un gasto")) === null) return;
       try {
         await api.borrar("gastos", $b.dataset.borrarGasto);
         ctx.refrescar();

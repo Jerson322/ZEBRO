@@ -19,6 +19,11 @@ alter table public.miembros drop constraint if exists miembros_rol_check;
 alter table public.miembros add constraint miembros_rol_check
   check (rol in ('admin', 'cajero', 'mesero', 'cocina', 'domiciliario'));
 
+-- Clave de autorización (opcional): la pone el administrador para sí mismo y, si quiere, para
+-- alguien de confianza. Mientras nadie tenga clave, nada la pide. Se guarda cifrada (bcrypt).
+create extension if not exists pgcrypto with schema extensions;
+alter table public.miembros add column if not exists clave_hash text;
+
 create or replace function public.rol_actual() returns text
 language sql stable security definer set search_path = public as $$
   select rol from miembros where user_id = auth.uid() and activo
@@ -29,6 +34,68 @@ language plpgsql stable security definer set search_path = public as $$
 begin
   if coalesce(rol_actual(), '') <> all (permitidos) then
     raise exception 'No tienes permiso para esta acción' using errcode = '42501';
+  end if;
+end $$;
+
+-- ¿Hay al menos una clave de autorización? (si no, no se pide nunca)
+create or replace function public.hay_claves() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from miembros where activo and clave_hash is not null)
+$$;
+
+-- Nombre de quien autoriza con esa clave (null si no es válida). Uso interno.
+create or replace function public.quien_autoriza(p_clave text) returns text
+language sql stable security definer set search_path = public, extensions as $$
+  select nombre from miembros
+  where activo and clave_hash is not null and coalesce(p_clave, '') <> ''
+    and clave_hash = extensions.crypt(p_clave, clave_hash)
+  limit 1
+$$;
+
+-- Exige una clave válida si hay claves; devuelve quién autorizó (o null si no se usan claves). Uso interno.
+create or replace function public.exigir_clave(p_clave text) returns text
+language plpgsql security definer set search_path = public as $$
+declare
+  v_quien text;
+begin
+  if not hay_claves() then
+    return null;
+  end if;
+  v_quien := quien_autoriza(p_clave);
+  if v_quien is null then
+    perform pg_sleep(0.5); -- frena a quien pruebe claves al azar
+    raise exception 'Clave de autorización incorrecta' using errcode = '42501';
+  end if;
+  return v_quien;
+end $$;
+
+-- Para la pantalla: revisa una clave antes de borrar algo.
+create or replace function public.verificar_clave(p_clave text) returns boolean
+language plpgsql security definer set search_path = public as $$
+begin
+  perform exigir_rol('admin', 'cajero', 'mesero', 'cocina', 'domiciliario');
+  perform exigir_clave(p_clave);
+  return true;
+end $$;
+
+-- Pone, cambia o quita (clave vacía) la clave de un usuario. El administrador la de cualquiera;
+-- cada uno la suya. Solo números, de 4 a 8.
+create or replace function public.poner_clave(p_usuario uuid, p_clave text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_usuario is distinct from auth.uid() then
+    perform exigir_rol('admin');
+  end if;
+  if coalesce(trim(p_clave), '') = '' then
+    update miembros set clave_hash = null where user_id = p_usuario;
+    return;
+  end if;
+  if trim(p_clave) !~ '^[0-9]{4,8}$' then
+    raise exception 'La clave debe tener de 4 a 8 números';
+  end if;
+  update miembros set clave_hash = extensions.crypt(trim(p_clave), extensions.gen_salt('bf')) where user_id = p_usuario;
+  if not found then
+    raise exception 'Ese usuario no tiene acceso al sistema';
   end if;
 end $$;
 
@@ -633,8 +700,10 @@ begin
   end if;
 end $$;
 
--- Lo que no se ha enviado a cocina lo quita cualquiera; lo ya enviado, solo caja o administrador.
-create or replace function public.quitar_item(p_item uuid) returns void
+-- Lo que no se ha enviado a cocina lo quita cualquiera. Lo ya enviado: con clave de autorización
+-- (si hay claves) o, si no se usan claves, solo caja o administrador.
+drop function if exists public.quitar_item(uuid);
+create or replace function public.quitar_item(p_item uuid, p_clave text default null) returns void
 language plpgsql security definer set search_path = public as $$
 declare
   v_estado text;
@@ -647,7 +716,11 @@ begin
   end if;
   perform solo_mesas_si_domiciliario((select pedido_id from pedido_items where id = p_item));
   if v_estado <> 'nuevo' then
-    perform exigir_rol('admin', 'cajero');
+    if hay_claves() then
+      perform exigir_clave(p_clave);
+    else
+      perform exigir_rol('admin', 'cajero');
+    end if;
   end if;
   delete from pedido_items where id = p_item;
 end $$;
@@ -896,13 +969,21 @@ begin
 end $$;
 
 -- Anula una cuenta. Si ya estaba pagada, devuelve al inventario lo que se descontó.
-create or replace function public.anular(p_pedido uuid, p_motivo text) returns void
+-- Con claves: la caja o el administrador, con clave de autorización. Sin claves: solo el administrador.
+drop function if exists public.anular(uuid, text);
+create or replace function public.anular(p_pedido uuid, p_motivo text, p_clave text default null) returns void
 language plpgsql security definer set search_path = public as $$
 declare
   v_pedido pedidos;
   v_mov record;
+  v_quien text;
 begin
-  perform exigir_rol('admin');
+  if hay_claves() then
+    perform exigir_rol('admin', 'cajero');
+    v_quien := exigir_clave(p_clave);
+  else
+    perform exigir_rol('admin');
+  end if;
   select * into v_pedido from pedidos where id = p_pedido for update;
   if not found or v_pedido.estado = 'anulado' then
     raise exception 'Esa cuenta no existe o ya está anulada';
@@ -920,7 +1001,7 @@ begin
     end loop;
   end if;
   update pedidos set estado = 'anulado', cerrado = coalesce(cerrado, now()),
-    motivo_anulacion = coalesce(trim(p_motivo), '')
+    motivo_anulacion = concat_ws(' · ', nullif(trim(coalesce(p_motivo, '')), ''), 'autorizó ' || v_quien)
   where id = p_pedido;
   perform soltar_mesa(p_pedido);
 end $$;
@@ -1052,8 +1133,9 @@ begin
   foreach f in array array['rol_actual()', 'exigir_rol(text[])', 'reclamar_admin(text)', 'lista_equipo()',
     'abrir_mesa(uuid)', 'crear_mesa(text)', 'crear_domicilio(text, text, text, integer, uuid, text)', 'asignar_domiciliario(uuid, uuid)',
     'mi_empleado()', 'cambiar_entrega(uuid, text)', 'registrar_novedad(uuid, text)', 'registrar_recibido(uuid, integer)',
-    'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid)', 'enviar_cocina(uuid)',
-    'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text)',
+    'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid, text)', 'enviar_cocina(uuid)',
+    'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text, text)',
+    'hay_claves()', 'verificar_clave(text)', 'poner_clave(uuid, text)',
     'cobrar_parte(uuid, jsonb, text)', 'abonar(uuid, integer, text)', 'cambiar_para_llevar(uuid, boolean)',
     'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()', 'impresiones_por_imprimir()',
     'asignar_numero_domicilio()'] loop
@@ -1066,6 +1148,8 @@ end $$;
 revoke all on function public.domicilio_para_mi(uuid) from public, anon, authenticated;
 revoke all on function public.solo_mesas_si_domiciliario(uuid) from public, anon, authenticated;
 revoke all on function public.cerrar_cuenta(uuid) from public, anon, authenticated;
+revoke all on function public.quien_autoriza(text) from public, anon, authenticated;
+revoke all on function public.exigir_clave(text) from public, anon, authenticated;
 revoke all on function public.soltar_mesa(uuid) from public, anon, authenticated;
 
 -- Actualizaciones en vivo para mesas, cocina y domicilios.

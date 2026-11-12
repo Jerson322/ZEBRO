@@ -1,6 +1,7 @@
 // Inventario de insumos (solo administrador): existencias, compras, salidas y movimientos.
 import * as api from "../api.js";
 import { esc, pesos, numero, opciones, tabla, tarjeta, formulario, aviso } from "../util.js";
+import { autorizar } from "../clave.js";
 
 const UNIDADES = [["g", "gramos (g)"], ["kg", "kilos (kg)"], ["ml", "mililitros (ml)"], ["l", "litros (l)"], ["und", "unidades (und)"]];
 
@@ -39,6 +40,7 @@ export async function pintar($vista, ctx) {
   $vista.querySelectorAll("[data-borrar]").forEach(($b) =>
     $b.addEventListener("click", async () => {
       if (!confirm("¿Borrar este insumo?")) return;
+      if ((await autorizar(ctx, "Borrar un insumo del inventario")) === null) return;
       try {
         await api.borrar("insumos", $b.dataset.borrar);
         ctx.refrescar();

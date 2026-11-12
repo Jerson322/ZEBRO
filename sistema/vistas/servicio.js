@@ -2,6 +2,7 @@
 import * as api from "../api.js";
 import { esc, pesos, opciones, formulario, mostrar, cerrarDialogo, hora, minutosDesde, aviso, tarjeta as tarjetaResumen } from "../util.js";
 import { preferencia, guardarPreferencia, imprimir, ticketCuenta } from "../impresion.js";
+import { autorizar } from "../clave.js";
 
 const METODOS = ["Efectivo", "Tarjeta", "Transferencia", "Nequi", "Daviplata"];
 // Un domicilio solo tiene estos valores de envío.
@@ -127,6 +128,7 @@ function editarMesas(lista, ctx) {
   $c.querySelectorAll("[data-borrar]").forEach(($b) =>
     $b.addEventListener("click", async () => {
       if (!confirm("¿Borrar esta mesa?")) return;
+      if ((await autorizar(ctx, "Borrar una mesa")) === null) return;
       try {
         await api.borrar("mesas", $b.dataset.borrar);
         await recargar();
@@ -262,14 +264,14 @@ export async function cuenta($vista, ctx, pedidoId) {
   const pagado = pagos.reduce((s, x) => s + x.valor, 0);
   const metodoDe = (pagoId) => pagos.find((x) => x.id === pagoId)?.metodo ?? "";
   const filasItems = items.map((i) => {
-    const puedeQuitar = abierta && !soloLectura && !i.pago_id && (i.estado === "nuevo" || puedeCobrar(rol));
+    const puedeQuitar = abierta && !soloLectura && !i.pago_id && (i.estado === "nuevo" || puedeCobrar(rol) || ctx.conClave);
     const detalle = [...i.opciones.map((o) => o.nombre), i.nota].filter(Boolean).join(" · ");
     return `<div class="item">
       <div><strong>${i.cantidad}× ${esc(i.nombre)}</strong>${detalle ? `<br><small class="suave">${esc(detalle)}</small>` : ""}
         <br><small class="etiqueta estado-${i.estado}">${ESTADO_ITEM[i.estado]}</small>
         ${abierta && i.pago_id ? `<small class="etiqueta estado-listo">Pagado · ${esc(metodoDe(i.pago_id))}</small>` : ""}</div>
       <div class="num">${pesos(i.precio * i.cantidad)}
-        ${puedeQuitar ? `<br><button class="chico peligro" data-quitar="${i.id}" aria-label="Quitar">Quitar</button>` : ""}</div>
+        ${puedeQuitar ? `<br><button class="chico peligro" data-quitar="${i.id}" data-enviado="${i.estado === "nuevo" ? "" : "si"}" aria-label="Quitar">Quitar</button>` : ""}</div>
     </div>`;
   }).join("");
 
@@ -337,10 +339,10 @@ export async function cuenta($vista, ctx, pedidoId) {
           ${(hay("cocina") || hay("listo")) && !esDomicilio ? `<button id="entregar">Marcar entregado</button>` : ""}
           ${items.length ? `<button id="precuenta">Imprimir cuenta</button>` : ""}
           ${puedeCobrar(rol) && items.length && !hay("nuevo") ? `<button class="principal" id="cobrar">${pagado ? "Cobrar lo que falta" : "Cobrar"}</button>` : ""}
-          ${rol === "admin" ? `<button class="peligro" id="anular">Anular cuenta</button>` : ""}
+          ${rol === "admin" || (ctx.conClave && rol === "cajero") ? `<button class="peligro" id="anular">Anular cuenta</button>` : ""}
         </div>` : abierta ? "" : `<div class="acciones-cuenta">
           ${rol !== "domiciliario" ? `<button id="imprimir">Imprimir</button>` : ""}
-          ${rol === "admin" && p.estado === "pagado" ? `<button class="peligro" id="anular">Anular venta</button>` : ""}
+          ${(rol === "admin" || (ctx.conClave && rol === "cajero")) && p.estado === "pagado" ? `<button class="peligro" id="anular">Anular venta</button>` : ""}
         </div>`}
       </div>
     </div>`;
@@ -360,7 +362,12 @@ export async function cuenta($vista, ctx, pedidoId) {
     })
   );
   $vista.querySelectorAll("[data-quitar]").forEach(($b) =>
-    $b.addEventListener("click", () => hecho(api.quitarItem($b.dataset.quitar)))
+    $b.addEventListener("click", async () => {
+      // Lo que ya se envió a cocina pide clave de autorización (la revisa la base de datos).
+      const clave = $b.dataset.enviado ? await autorizar(ctx, "Quitar un plato que ya se envió a cocina", { verificar: false }) : "";
+      if (clave === null) return;
+      hecho(api.quitarItem($b.dataset.quitar, clave));
+    })
   );
   document.getElementById("enviar")?.addEventListener("click", () =>
     // Si la comandera está en este mismo equipo, imprime de una sin esperar el aviso en vivo.
@@ -383,7 +390,9 @@ export async function cuenta($vista, ctx, pedidoId) {
   document.getElementById("anular")?.addEventListener("click", () => {
     const motivo = prompt("¿Por qué se anula? (Si ya estaba pagada, el inventario se devuelve)");
     if (motivo === null) return;
-    hecho(api.anular(p.id, motivo), "Cuenta anulada");
+    autorizar(ctx, "Anular la cuenta", { verificar: false }).then((clave) => {
+      if (clave !== null) hecho(api.anular(p.id, motivo, clave), "Cuenta anulada");
+    });
   });
   const $domiciliario = document.getElementById("domiciliario");
   $domiciliario?.addEventListener("change", () => hecho(api.asignarDomiciliario(p.id, $domiciliario.value)));

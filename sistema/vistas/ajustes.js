@@ -2,6 +2,7 @@
 import * as api from "../api.js";
 import { esc, aviso } from "../util.js";
 import { imprimir, ticketCuenta } from "../impresion.js";
+import { autorizar } from "../clave.js";
 
 export async function pintar($vista, ctx) {
   const n = ctx.negocio ?? {};
@@ -31,7 +32,47 @@ export async function pintar($vista, ctx) {
         <button type="button" id="prueba-ticket">Imprimir ticket de prueba</button>
         <button type="submit" class="principal">Guardar</button>
       </div>
+    </form>
+    <form class="panel formulario-plano" id="mi-clave">
+      <h2>Clave de autorización</h2>
+      <p class="suave" style="margin:0">Opcional. Si la pones, el sistema la pide para anular cuentas, quitar platos que ya se
+        enviaron a cocina y borrar productos, categorías, modificadores, insumos, mesas o gastos. Así nadie hace esos cambios
+        sin ti, aunque use tu sesión. También puedes darle una clave a alguien de confianza en «Empleados → Acceso».</p>
+      <p style="margin:0">${ctx.perfil.clave_hash ? "✓ Ya tienes una clave." : "Todavía no tienes clave."}</p>
+      <div class="fila">
+        <label>${ctx.perfil.clave_hash ? "Nueva clave" : "Clave"} (de 4 a 8 números)<input name="clave" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></label>
+        <label>Repítela<input name="repetir" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></label>
+      </div>
+      <div class="botones">
+        ${ctx.perfil.clave_hash ? `<button type="button" class="peligro" id="quitar-mi-clave">Quitar mi clave</button>` : ""}
+        <button type="submit" class="principal">${ctx.perfil.clave_hash ? "Cambiar clave" : "Guardar clave"}</button>
+      </div>
     </form>`;
+
+  const $miClave = $vista.querySelector("#mi-clave");
+  const guardarMiClave = async (clave) => {
+    // Cambiar o quitar una clave que ya existe pide la clave actual (o la de otro autorizado).
+    if (ctx.perfil.clave_hash && (await autorizar(ctx, "Escribe tu clave actual")) === null) return;
+    try {
+      await api.ponerClave(ctx.perfil.user_id, clave);
+      ctx.perfil.clave_hash = clave ? "si" : null;
+      ctx.conClave = await api.hayClaves();
+      aviso(clave ? "Clave guardada" : "Clave quitada");
+      ctx.refrescar();
+    } catch (error) {
+      aviso(error.message);
+    }
+  };
+  $miClave.addEventListener("submit", (evento) => {
+    evento.preventDefault();
+    const { clave, repetir } = Object.fromEntries(new FormData($miClave));
+    if (!/^\d{4,8}$/.test(clave)) return aviso("La clave debe tener de 4 a 8 números");
+    if (clave !== repetir) return aviso("Las dos claves no coinciden");
+    guardarMiClave(clave);
+  });
+  $vista.querySelector("#quitar-mi-clave")?.addEventListener("click", () => {
+    if (confirm("¿Quitar tu clave de autorización?")) guardarMiClave("");
+  });
 
   const $form = $vista.querySelector("#datos-negocio");
   $form.addEventListener("submit", async (evento) => {

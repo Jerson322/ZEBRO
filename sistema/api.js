@@ -166,7 +166,7 @@ export const registrarRecibido = (pedidoId, valor) =>
   rpc("registrar_recibido", { p_pedido: pedidoId, p_valor: valor === "" || valor == null ? null : Number(valor) });
 export const agregarItem = (pedidoId, platoId, cantidad, opcionesIds, nota) =>
   rpc("agregar_item", { p_pedido: pedidoId, p_plato: platoId, p_cantidad: cantidad, p_opciones: opcionesIds, p_nota: nota });
-export const quitarItem = (itemId) => rpc("quitar_item", { p_item: itemId });
+export const quitarItem = (itemId, clave) => rpc("quitar_item", { p_item: itemId, p_clave: clave || null });
 export const enviarCocina = (pedidoId) => rpc("enviar_cocina", { p_pedido: pedidoId });
 export const marcarItems = (pedidoId, de, a) => rpc("marcar_items", { p_pedido: pedidoId, p_de: de, p_a: a });
 // Marca entregado todo lo que se está preparando de un pedido.
@@ -180,7 +180,11 @@ export const cobrarParte = (pedidoId, items, metodo) =>
   rpc("cobrar_parte", { p_pedido: pedidoId, p_items: items, p_metodo: metodo });
 export const cambiarParaLlevar = (pedidoId, paraLlevar) =>
   rpc("cambiar_para_llevar", { p_pedido: pedidoId, p_para_llevar: paraLlevar });
-export const anular = (pedidoId, motivo) => rpc("anular", { p_pedido: pedidoId, p_motivo: motivo });
+export const anular = (pedidoId, motivo, clave) => rpc("anular", { p_pedido: pedidoId, p_motivo: motivo, p_clave: clave || null });
+// Clave de autorización.
+export const hayClaves = () => rpc("hay_claves");
+export const verificarClave = (clave) => rpc("verificar_clave", { p_clave: clave });
+export const ponerClave = (usuarioId, clave) => rpc("poner_clave", { p_usuario: usuarioId, p_clave: clave || "" });
 export const moverInsumo = (insumoId, tipo, cantidad, costo, motivo) =>
   rpc("mover_insumo", {
     p_insumo: insumoId, p_tipo: tipo, p_cantidad: Number(cantidad),

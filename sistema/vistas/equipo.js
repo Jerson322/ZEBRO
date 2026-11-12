@@ -1,6 +1,7 @@
 // Empleados (solo administrador): nombre, rol y acceso al sistema.
 import * as api from "../api.js";
 import { esc, opciones, tabla, formulario, aviso } from "../util.js";
+import { autorizar } from "../clave.js";
 
 // El rol del empleado se guarda en "cargo". Los que tienen acceso usan el rol del sistema equivalente.
 const ROLES_EMPLEADO = ["Mesero", "Cajero", "Cocina", "Domiciliario", "Administrador"];
@@ -66,11 +67,34 @@ function formularioAcceso(e, miembro, ctx) {
       </div>` : `<p class="suave" style="margin:0">${miembro ? "Tiene acceso al sistema." : "Su acceso está desactivado."}</p>`}
     <label>Entra como<select name="rol">${opciones(ROLES_ACCESO, rolSugerido)}</select></label>
     ${tieneCuenta ? `<label>Nueva clave (opcional, mínimo 8)<input name="clave" type="text" autocomplete="off"></label>
-      ${miembro ? `<label class="opcion"><input type="checkbox" name="quitar"> Quitar el acceso</label>` : ""}` : ""}`,
+      ${miembro ? `<label class="opcion"><input type="checkbox" name="quitar"> Quitar el acceso</label>` : ""}` : ""}
+    <fieldset><legend>Clave de autorización <small class="suave">opcional</small></legend>
+      <p class="suave" style="margin:0 0 8px">Con ella, ${esc(e.nombre)} puede autorizar anulaciones, quitar platos ya enviados a cocina y borrar cosas.
+        ${miembro?.clave_hash ? "<strong>Ya tiene una.</strong>" : "No tiene."}</p>
+      <div class="fila" style="align-items:end">
+        <label>Clave (de 4 a 8 números)<input name="autoriza" type="text" inputmode="numeric" maxlength="8" autocomplete="off"></label>
+        <button type="button" id="generar-clave">Generar</button>
+      </div>
+      ${miembro?.clave_hash ? `<label class="opcion"><input type="checkbox" name="quitarAutoriza"> Quitarle la clave de autorización</label>` : ""}
+    </fieldset>`,
     async (c) => {
+      const autoriza = (c.autoriza ?? "").trim();
+      if (autoriza && !/^\d{4,8}$/.test(autoriza)) throw new Error("La clave de autorización debe tener de 4 a 8 números");
+      // Dar, cambiar o quitar una clave de autorización también pide autorización (si ya se usan claves).
+      if ((autoriza || c.quitarAutoriza) && (await autorizar(ctx, `Clave de autorización de ${e.nombre}`)) === null) {
+        aviso("No se guardó nada: se canceló la autorización");
+        return;
+      }
+      const ponerAutoriza = async () => {
+        if (!autoriza && !c.quitarAutoriza) return;
+        const usuario = (await api.empleados()).find((x) => x.id === e.id)?.user_id;
+        if (usuario) await api.ponerClave(usuario, c.quitarAutoriza ? "" : autoriza);
+        ctx.conClave = await api.hayClaves();
+      };
       if (!tieneCuenta) {
         await api.cuentaEquipo({ accion: "crear", empleadoId: e.id, correo: c.correo.trim(), clave: c.clave, rol: c.rol });
-        aviso(`Listo: ${e.nombre} entra con ${c.correo.trim()}`);
+        await ponerAutoriza();
+        aviso(`Listo: ${e.nombre} entra con ${c.correo.trim()}${autoriza ? ` · clave de autorización ${autoriza}` : ""}`);
         return;
       }
       if (c.quitar) {
@@ -79,6 +103,12 @@ function formularioAcceso(e, miembro, ctx) {
       }
       await api.cuentaEquipo({ accion: "rol", empleadoId: e.id, rol: c.rol });
       if (c.clave) await api.cuentaEquipo({ accion: "clave", empleadoId: e.id, clave: c.clave });
+      await ponerAutoriza();
+      if (autoriza) aviso(`Clave de autorización de ${e.nombre}: ${autoriza}`);
     },
     { alTerminar: () => ctx.refrescar() });
+  // Genera una clave de 4 números para dársela a la persona.
+  document.getElementById("generar-clave").addEventListener("click", () => {
+    document.querySelector('[name="autoriza"]').value = String(Math.floor(1000 + Math.random() * 9000));
+  });
 }

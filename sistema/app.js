@@ -232,6 +232,8 @@ async function entrar({ bienvenida = false } = {}) {
     if (!ctx.perfil || !ctx.perfil.activo) return pantallaSinRol();
     await ctx.recargarMenu();
     ctx.negocio = await api.negocio();
+    // ¿Se usan claves de autorización? (si nadie tiene clave, nada la pide)
+    ctx.conClave = await api.hayClaves().catch(() => false);
     document.title = nombreNegocio();
     if (bienvenida) mostrarBienvenida();
     dejarDeEscuchar?.();
