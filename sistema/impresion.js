@@ -48,7 +48,12 @@ export function imprimirAqui(html) {
     document.body.classList.add("imprimiendo");
     // Espera a que carguen las imágenes (el logo) para que no salga en blanco.
     await Promise.all([...$zona.querySelectorAll("img")].map((img) => img.decode().catch(() => {})));
-    await new Promise((listo) => requestAnimationFrame(() => requestAnimationFrame(listo)));
+    // Espera a que el ticket se pinte. Con la pestaña oculta (otra pestaña o ventana encima) Chrome
+    // no pinta y requestAnimationFrame no llega nunca: por eso se espera como máximo un momento.
+    await Promise.race([
+      new Promise((listo) => requestAnimationFrame(() => requestAnimationFrame(listo))),
+      new Promise((listo) => setTimeout(listo, 250)),
+    ]);
     window.print();
     document.body.classList.remove("imprimiendo");
     $zona.innerHTML = "";

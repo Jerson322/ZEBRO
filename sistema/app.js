@@ -334,6 +334,8 @@ window.addEventListener("hashchange", (evento) => {
 });
 // Al volver a la pestaña (por ejemplo, el celular estuvo bloqueado) se trae lo último.
 document.addEventListener("visibilitychange", () => {
+  // Al volver a la pestaña se imprime de una lo que haya quedado pendiente.
+  if (!document.hidden && ctx.perfil) imprimirComandasPendientes();
   if (!document.hidden && ctx.perfil && rutaActual().seccion.enVivo && !dialogoAbierto()) pintar();
 });
 window.addEventListener("unhandledrejection", (evento) => aviso(evento.reason?.message || "Algo salió mal"));
