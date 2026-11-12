@@ -7,6 +7,10 @@ import { imprimir } from "./impresion.js";
 import { contadorEfectivo, detalleConteo } from "./caja.js";
 
 const suma = (lista, f) => lista.reduce((s, x) => s + Number(f(x) || 0), 0);
+const METODOS = ["Efectivo", "Tarjeta", "Transferencia", "Nequi", "Daviplata"];
+// «Te sobró / te faltó / la caja cuadra» según lo contado contra lo que debe haber.
+export const resultadoCaja = (diferencia) =>
+  diferencia === 0 ? "LA CAJA CUADRA" : diferencia > 0 ? `TE SOBRÓ ${pesos(diferencia)}` : `TE FALTÓ ${pesos(-diferencia)}`;
 const fechaHora = (iso) => new Date(iso).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" });
 
 // Desde la apertura de la caja (o desde el comienzo del día, si no se abrió) hasta ahora.
@@ -19,9 +23,9 @@ export async function calcularCierre(caja = null) {
   const pagados = cerrados.filter((p) => p.estado === "pagado");
   const anulados = cerrados.filter((p) => p.estado === "anulado");
   const pagos = pagados.flatMap((p) => (p.pagos?.length ? p.pagos : [{ metodo: p.metodo_pago, valor: p.total + (p.propina || 0) }]));
-  const metodos = [...new Set(pagos.map((x) => x.metodo))]
-    .map((m) => ({ metodo: m, pagos: pagos.filter((x) => x.metodo === m).length, valor: suma(pagos.filter((x) => x.metodo === m), (x) => x.valor) }))
-    .sort((a, b) => b.valor - a.valor);
+  // Todos los métodos de pago, aunque no tengan pagos (así se ve cada uno, incluso en $0).
+  const metodos = [...new Set([...METODOS, ...pagos.map((x) => x.metodo)])]
+    .map((m) => ({ metodo: m, pagos: pagos.filter((x) => x.metodo === m).length, valor: suma(pagos.filter((x) => x.metodo === m), (x) => x.valor) }));
   const tipos = ["Mesa", "Para llevar", "Domicilio"].map((t) => {
     const lista = pagados.filter((p) => (p.tipo === "domicilio" ? "Domicilio" : p.para_llevar ? "Para llevar" : "Mesa") === t);
     return { tipo: t, cuentas: lista.length, valor: suma(lista, (p) => p.total) };
@@ -74,7 +78,8 @@ export function ticketCierre(c, negocio, { usuario, contado, conteo, corte = fal
     ${fila("TOTAL VENTAS", pesos(c.ventas), "t-total")}
     <hr>
     <div><strong>DINERO POR MÉTODO</strong></div>
-    ${c.metodos.length ? c.metodos.map((m) => fila(`${esc(m.metodo)} (${m.pagos})`, pesos(m.valor))).join("") : "<div>Sin pagos</div>"}
+    ${c.metodos.map((m) => fila(`${esc(m.metodo)} (${m.pagos})`, pesos(m.valor))).join("")}
+    ${fila("TOTAL RECIBIDO", pesos(c.metodos.reduce((s, m) => s + m.valor, 0)), "t-total")}
     <hr>
     <div><strong>GASTOS</strong></div>
     ${c.gastosLista.length ? c.gastosLista.map((g) => fila(esc(`${g.categoria}${g.descripcion ? ` · ${g.descripcion}` : ""}`).slice(0, 34), pesos(g.valor))).join("") : "<div>Sin gastos</div>"}
@@ -85,7 +90,8 @@ export function ticketCierre(c, negocio, { usuario, contado, conteo, corte = fal
     ${fila("+ Ventas en efectivo", pesos(c.ventasEfectivo))}
     ${fila("− Gastos en efectivo", pesos(c.gastosEfectivo))}
     ${fila("Debe haber", pesos(c.efectivoEsperado), "t-total")}
-    ${contado != null ? fila("Contado", pesos(contado)) + fila(diferencia === 0 ? "Cuadra" : diferencia > 0 ? "Sobra" : "Falta", pesos(Math.abs(diferencia)), "t-total") : ""}
+    ${contado != null ? fila("Contado en caja", pesos(contado), "t-total") : fila("Contado en caja", "No se contó")}
+    ${contado != null ? `<div class="t-centro t-resultado">${resultadoCaja(diferencia)}</div>` : ""}
     ${detalle.length ? `<div class="t-chico">${detalle.map((x) => fila(`${x.cantidad} × ${pesos(x.denominacion)}`, pesos(x.valor))).join("")}</div>` : ""}
     <hr>
     <div><strong>PRODUCTOS VENDIDOS</strong></div>
@@ -120,7 +126,8 @@ export async function abrirCierre(ctx, { conSalida = false, salir } = {}) {
     </div>
     <div>
       <strong>Dinero por método</strong>
-      ${c.metodos.length ? c.metodos.map((m) => fila(`${esc(m.metodo)} <small class="suave">(${m.pagos} pagos)</small>`, pesos(m.valor))).join("") : `<p class="suave" style="margin:4px 0">Sin pagos.</p>`}
+      ${c.metodos.map((m) => fila(`${esc(m.metodo)} <small class="suave">(${m.pagos} ${m.pagos === 1 ? "pago" : "pagos"})</small>`, pesos(m.valor))).join("")}
+      ${fila("Total recibido", pesos(c.metodos.reduce((s, m) => s + m.valor, 0)), true)}
     </div>
     <div>
       <strong>Efectivo en caja</strong>
@@ -148,7 +155,7 @@ export async function abrirCierre(ctx, { conSalida = false, salir } = {}) {
     if (!total) return ($diferencia.textContent = "");
     const d = total - c.efectivoEsperado;
     $diferencia.className = d === 0 ? "positivo" : d > 0 ? "suave" : "error";
-    $diferencia.textContent = d === 0 ? "✓ La caja cuadra" : d > 0 ? `Sobran ${pesos(d)}` : `Faltan ${pesos(-d)}`;
+    $diferencia.textContent = d === 0 ? "✓ La caja cuadra" : d > 0 ? `Te sobró ${pesos(d)}` : `Te faltó ${pesos(-d)}`;
   });
   const contadoFinal = () => (contado || Object.keys(conteo).length ? contado : null);
   $c.querySelector("#cancelar-cierre").addEventListener("click", cerrarDialogo);

@@ -1,7 +1,8 @@
 // Apertura de caja y contador de efectivo con los billetes y monedas de Colombia.
 // Cada toque a un billete suma uno (dos toques al de $2.000 = $4.000); «−» quita uno.
 import * as api from "./api.js";
-import { pesos, mostrar, cerrarDialogo, aviso } from "./util.js";
+import { esc, pesos, mostrar, cerrarDialogo, aviso } from "./util.js";
+import { imprimir } from "./impresion.js";
 
 export const BILLETES = [100000, 50000, 20000, 10000, 5000, 2000];
 export const MONEDAS = [1000, 500, 200, 100, 50];
@@ -52,8 +53,6 @@ export function abrirCaja(ctx, { alTerminar } = {}) {
   let total = 0;
   const $c = mostrar(`
     <h2>Abrir caja</h2>
-    <p class="suave" style="margin:0">Cuenta el efectivo con el que empiezas (la base). Toca cada billete o moneda
-      las veces que lo tengas: dos toques al de $2.000 son $4.000.</p>
     <div id="contador-apertura" class="contador-efectivo"></div>
     <div class="botones">
       <button type="button" id="apertura-luego">Ahora no</button>
@@ -70,15 +69,36 @@ export function abrirCaja(ctx, { alTerminar } = {}) {
   $abrir.addEventListener("click", async () => {
     $abrir.disabled = true;
     try {
-      ctx.caja = await api.abrirCaja(total, contador.conteo()).then(() => api.cajaAbierta());
+      const conteo = contador.conteo();
+      ctx.caja = await api.abrirCaja(total, conteo).then(() => api.cajaAbierta());
       cerrarDialogo();
       aviso(`Caja abierta con ${pesos(total)}`);
+      // Ticket de apertura en la comandera (desde un celular se envía a la comandera).
+      imprimir(ticketApertura(ctx.caja, ctx.negocio, ctx.perfil.nombre, conteo));
       alTerminar?.();
     } catch (error) {
       aviso(error.message);
       $abrir.disabled = false;
     }
   });
+}
+
+// Ticket de apertura: con cuánto se abre la caja y cuántos billetes y monedas de cada uno.
+export function ticketApertura(caja, negocio, usuario, conteo) {
+  const fila = (izq, der, clase = "") => `<div class="t-fila ${clase}"><span>${izq}</span><span>${der}</span></div>`;
+  const detalle = detalleConteo(conteo);
+  return `<div class="ticket">
+    <div class="t-centro t-negocio">${esc(negocio?.nombre ?? "")}</div>
+    <div class="t-centro t-negocio">APERTURA DE CAJA</div>
+    <div class="t-centro">${new Date(caja?.abierta_en ?? Date.now()).toLocaleString("es-CO", { dateStyle: "full", timeStyle: "short" })}</div>
+    ${usuario ? `<div class="t-centro">Abrió: ${esc(usuario)}</div>` : ""}
+    <hr>
+    ${detalle.length ? detalle.map((x) => fila(`${x.cantidad} × ${pesos(x.denominacion)}`, pesos(x.valor))).join("") : "<div>Sin efectivo</div>"}
+    <hr>
+    ${fila("BASE", pesos(caja?.base ?? totalConteo(conteo)), "t-total")}
+    <hr>
+    <div class="t-centro t-chico">Firma: ______________________</div>
+  </div>`;
 }
 
 // Al entrar la caja (administrador o cajero): si no hay caja abierta, se ofrece abrirla.
