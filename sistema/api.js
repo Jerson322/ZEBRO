@@ -166,6 +166,7 @@ export const registrarRecibido = (pedidoId, valor) =>
   rpc("registrar_recibido", { p_pedido: pedidoId, p_valor: valor === "" || valor == null ? null : Number(valor) });
 export const agregarItem = (pedidoId, platoId, cantidad, opcionesIds, nota) =>
   rpc("agregar_item", { p_pedido: pedidoId, p_plato: platoId, p_cantidad: cantidad, p_opciones: opcionesIds, p_nota: nota });
+export const cambiarCantidad = (itemId, cantidad) => rpc("cambiar_cantidad", { p_item: itemId, p_cantidad: Number(cantidad) });
 export const quitarItem = (itemId, clave) => rpc("quitar_item", { p_item: itemId, p_clave: clave || null });
 export const enviarCocina = (pedidoId) => rpc("enviar_cocina", { p_pedido: pedidoId });
 export const marcarItems = (pedidoId, de, a) => rpc("marcar_items", { p_pedido: pedidoId, p_de: de, p_a: a });

@@ -235,7 +235,9 @@ export async function domicilios($vista, ctx) {
 
 // La carta recuerda la categoría elegida y dónde estaba la pantalla mientras se trabaja en la
 // misma cuenta: al agregar un plato no se devuelve a «Todo» ni salta arriba.
-const vistaCarta = { pedido: null, categoria: "*" };
+const vistaCarta = { pedido: null, categoria: "*", busqueda: "" };
+// Para buscar sin importar mayúsculas ni tildes ("mazorcada" encuentra "Mazorcada especial").
+const normalizar = (t) => String(t ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 // Toques seguidos a un mismo plato: se juntan y se agregan de una vez (5 toques = 5×).
 const toques = new Map(); // id del plato → { n, temporizador }
 const ESPERA_TOQUES_MS = 700;
@@ -244,7 +246,7 @@ export async function cuenta($vista, ctx, pedidoId) {
   // Se vuelve a pintar la misma cuenta que está en pantalla (agregar un plato, aviso en vivo…).
   const repintando = Boolean($vista.querySelector(`[data-cuenta="${pedidoId}"]`));
   const scroll = repintando ? window.scrollY : 0;
-  if (vistaCarta.pedido !== pedidoId) Object.assign(vistaCarta, { pedido: pedidoId, categoria: "*" });
+  if (vistaCarta.pedido !== pedidoId) Object.assign(vistaCarta, { pedido: pedidoId, categoria: "*", busqueda: "" });
   const [p, listaMesas, equipo] = await Promise.all([api.pedido(pedidoId), api.mesas(), api.equipo()]);
   if (!p) {
     $vista.innerHTML = `<p class="vacio">Esa cuenta no existe.</p>`;
@@ -267,7 +269,9 @@ export async function cuenta($vista, ctx, pedidoId) {
     const puedeQuitar = abierta && !soloLectura && !i.pago_id && (i.estado === "nuevo" || puedeCobrar(rol) || ctx.conClave);
     const detalle = [...i.opciones.map((o) => o.nombre), i.nota].filter(Boolean).join(" · ");
     return `<div class="item">
-      <div><strong>${i.cantidad}× ${esc(i.nombre)}</strong>${detalle ? `<br><small class="suave">${esc(detalle)}</small>` : ""}
+      <div>${abierta && !soloLectura && i.estado === "nuevo" && !i.pago_id
+          ? `<input type="number" min="0" max="999" inputmode="numeric" class="cantidad-linea" data-cantidad-item="${i.id}" value="${i.cantidad}" aria-label="Cantidad de ${esc(i.nombre)}"> <strong>${esc(i.nombre)}</strong>`
+          : `<strong>${i.cantidad}× ${esc(i.nombre)}</strong>`}${detalle ? `<br><small class="suave">${esc(detalle)}</small>` : ""}
         <br><small class="etiqueta estado-${i.estado}">${ESTADO_ITEM[i.estado]}</small>
         ${abierta && i.pago_id ? `<small class="etiqueta estado-listo">Pagado · ${esc(metodoDe(i.pago_id))}</small>` : ""}</div>
       <div class="num">${pesos(i.precio * i.cantidad)}
@@ -322,7 +326,7 @@ export async function cuenta($vista, ctx, pedidoId) {
       ${abierta ? "" : `<span class="etiqueta">${estadoCerrada}</span>`}
     </div>
     <div class="cuenta" data-cuenta="${p.id}">
-      ${abierta && !soloLectura ? `<div class="carta">${carta(ctx.menu, vistaCarta.categoria)}</div>` : ""}
+      ${abierta && !soloLectura ? `<div class="carta">${carta(ctx.menu, vistaCarta.categoria, vistaCarta.busqueda)}</div>` : ""}
       <div class="resumen">
         ${domicilio}
         ${paraLlevar}
@@ -354,13 +358,59 @@ export async function cuenta($vista, ctx, pedidoId) {
   $vista.querySelectorAll("[data-plato]").forEach(($b) =>
     $b.addEventListener("click", () => tocarPlato(ctx, p.id, $b))
   );
+  // Qué platos se ven: con búsqueda, los que coinciden (de cualquier categoría); si no, los de la categoría.
+  const filtrarCarta = () => {
+    const texto = normalizar(vistaCarta.busqueda);
+    let visibles = 0;
+    $vista.querySelectorAll("[data-de]").forEach(($pl) => {
+      $pl.hidden = texto
+        ? !texto.split(/\s+/).every((palabra) => $pl.dataset.nombre.includes(palabra))
+        : vistaCarta.categoria !== "*" && $pl.dataset.de !== vistaCarta.categoria;
+      if (!$pl.hidden) visibles += 1;
+    });
+    $vista.querySelector(".pestanas")?.classList.toggle("buscando", Boolean(texto));
+    const $vacio = $vista.querySelector("#sin-resultados");
+    if ($vacio) $vacio.hidden = visibles > 0;
+    const $limpiar = $vista.querySelector("#limpiar-busqueda");
+    if ($limpiar) $limpiar.hidden = !texto;
+  };
   $vista.querySelectorAll("[data-categoria]").forEach(($b) =>
     $b.addEventListener("click", () => {
       vistaCarta.categoria = $b.dataset.categoria;
+      vistaCarta.busqueda = "";
+      const $buscar = $vista.querySelector("#buscar-plato");
+      if ($buscar) $buscar.value = "";
       $vista.querySelectorAll("[data-categoria]").forEach(($o) => $o.classList.toggle("activo", $o === $b));
-      $vista.querySelectorAll("[data-de]").forEach(($pl) => ($pl.hidden = $b.dataset.categoria !== "*" && $pl.dataset.de !== $b.dataset.categoria));
+      filtrarCarta();
     })
   );
+  const $buscar = $vista.querySelector("#buscar-plato");
+  $buscar?.addEventListener("input", () => {
+    vistaCarta.busqueda = $buscar.value;
+    filtrarCarta();
+  });
+  $buscar?.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      $buscar.value = vistaCarta.busqueda = "";
+      filtrarCarta();
+    }
+  });
+  $vista.querySelector("#limpiar-busqueda")?.addEventListener("click", () => {
+    $buscar.value = vistaCarta.busqueda = "";
+    filtrarCarta();
+    $buscar.focus();
+  });
+  if (vistaCarta.busqueda) filtrarCarta();
+  // Cantidad escrita a mano (40 en vez de 40 toques). 0 la quita.
+  $vista.querySelectorAll("[data-cantidad-item]").forEach(($i) => {
+    $i.addEventListener("focus", () => $i.select());
+    $i.addEventListener("keydown", (e) => { if (e.key === "Enter") $i.blur(); });
+    $i.addEventListener("change", () => {
+      const n = Math.round(Number($i.value));
+      if (!Number.isFinite(n) || n < 0) return ctx.refrescar();
+      hecho(api.cambiarCantidad($i.dataset.cantidadItem, n), n ? null : "Quitado");
+    });
+  });
   $vista.querySelectorAll("[data-quitar]").forEach(($b) =>
     $b.addEventListener("click", async () => {
       // Lo que ya se envió a cocina pide clave de autorización (la revisa la base de datos).
@@ -403,7 +453,7 @@ export async function cuenta($vista, ctx, pedidoId) {
     hecho(api.registrarNovedad(p.id, document.getElementById("novedad").value), "Novedad registrada"));
 }
 
-function carta(menu, elegida = "*") {
+function carta(menu, elegida = "*", busqueda = "") {
   const disponibles = menu.platos.filter((pl) => pl.activo);
   if (!disponibles.length) return `<p class="vacio">El menú está vacío. El administrador lo crea en «Menú y recetas».</p>`;
   const categorias = menu.categorias.filter((c) => disponibles.some((pl) => pl.categoria_id === c.id));
@@ -411,7 +461,12 @@ function carta(menu, elegida = "*") {
   // Si la categoría elegida ya no existe, se vuelve a «Todo».
   const activa = elegida === "*" || categorias.some((c) => c.id === elegida) || (elegida === "" && sinCategoria) ? elegida : "*";
   const pestana = (id, nombre) => `<button class="${id === activa ? "activo" : ""}" data-categoria="${id}">${esc(nombre)}</button>`;
-  return `<div class="pestanas">
+  return `<div class="buscador">
+      <span class="buscador-lupa" aria-hidden="true">🔍</span>
+      <input type="search" id="buscar-plato" placeholder="Buscar producto…" value="${esc(busqueda)}" autocomplete="off" aria-label="Buscar producto">
+      <button type="button" class="icono-boton" id="limpiar-busqueda" aria-label="Borrar búsqueda"${busqueda ? "" : " hidden"}>✕</button>
+    </div>
+    <div class="pestanas">
       ${pestana("*", "Todo")}
       ${categorias.map((c) => pestana(c.id, c.nombre)).join("")}
       ${sinCategoria ? pestana("", "Otros") : ""}
@@ -419,9 +474,10 @@ function carta(menu, elegida = "*") {
     <div class="platos">${disponibles.map((pl) => {
       const de = categorias.some((c) => c.id === pl.categoria_id) ? pl.categoria_id : "";
       const n = toques.get(pl.id)?.n;
-      return `<button class="plato" data-plato="${pl.id}" data-de="${de}"${activa !== "*" && de !== activa ? " hidden" : ""}>
+      return `<button class="plato" data-plato="${pl.id}" data-de="${de}" data-nombre="${esc(normalizar(`${pl.nombre} ${pl.descripcion ?? ""}`))}"${activa !== "*" && de !== activa ? " hidden" : ""}>
         ${n ? `<span class="contador">+${n}</span>` : ""}<strong>${esc(pl.nombre)}</strong><span>${pesos(pl.precio)}</span></button>`;
-    }).join("")}</div>`;
+    }).join("")}</div>
+    <p class="vacio" id="sin-resultados" hidden>No hay productos con ese nombre.</p>`;
 }
 
 // Tocar un plato sin modificadores suma 1 al contador del botón; al dejar de tocar se agregan

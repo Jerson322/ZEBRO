@@ -725,6 +725,29 @@ begin
   delete from pedido_items where id = p_item;
 end $$;
 
+-- Cambia la cantidad de un plato que todavía no se ha enviado a cocina (0 = quitarlo).
+create or replace function public.cambiar_cantidad(p_item uuid, p_cantidad integer) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_pedido uuid;
+begin
+  perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
+  select i.pedido_id into v_pedido from pedido_items i join pedidos p on p.id = i.pedido_id
+  where i.id = p_item and p.estado = 'abierto' and i.estado = 'nuevo' and i.pago_id is null;
+  if not found then
+    raise exception 'Solo se cambia la cantidad de lo que no se ha enviado a cocina';
+  end if;
+  perform solo_mesas_si_domiciliario(v_pedido);
+  if p_cantidad is null or p_cantidad < 0 or p_cantidad > 999 then
+    raise exception 'La cantidad debe ser de 0 a 999';
+  end if;
+  if p_cantidad = 0 then
+    delete from pedido_items where id = p_item;
+  else
+    update pedido_items set cantidad = p_cantidad where id = p_item;
+  end if;
+end $$;
+
 create or replace function public.enviar_cocina(p_pedido uuid) returns integer
 language plpgsql security definer set search_path = public as $$
 declare
@@ -1189,7 +1212,7 @@ begin
   foreach f in array array['rol_actual()', 'exigir_rol(text[])', 'reclamar_admin(text)', 'lista_equipo()',
     'abrir_mesa(uuid)', 'crear_mesa(text)', 'crear_domicilio(text, text, text, integer, uuid, text)', 'asignar_domiciliario(uuid, uuid)',
     'mi_empleado()', 'cambiar_entrega(uuid, text)', 'registrar_novedad(uuid, text)', 'registrar_recibido(uuid, integer)',
-    'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid, text)', 'enviar_cocina(uuid)',
+    'agregar_item(uuid, uuid, integer, uuid[], text)', 'quitar_item(uuid, text)', 'cambiar_cantidad(uuid, integer)', 'enviar_cocina(uuid)',
     'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text, text)',
     'hay_claves()', 'verificar_clave(text)', 'poner_clave(uuid, text)',
     'cobrar_parte(uuid, jsonb, text)', 'abonar(uuid, integer, text)',

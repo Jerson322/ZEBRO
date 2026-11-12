@@ -260,6 +260,15 @@
       text-align: left; min-height: 96px; padding: 14px; border: 0; border-radius: 14px; box-shadow: var(--sombra);
     }
     .plato:hover { box-shadow: 0 0 0 2px var(--acento-suave), var(--sombra); }
+    /* Lupa para buscar productos en la carta */
+    .buscador { position: relative; margin-bottom: 12px; }
+    .buscador input { padding-left: 42px; padding-right: 42px; font-size: 16px; min-height: 48px; border-radius: 14px; }
+    .buscador-lupa { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 17px; pointer-events: none; }
+    .buscador .icono-boton { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); }
+    .pestanas.buscando { opacity: 0.45; }
+    /* Cantidad escrita en las líneas que no se han enviado a cocina */
+    .cantidad-linea { width: 64px; min-height: 36px; padding: 4px 6px; text-align: center; font-weight: 800; font-size: 16px; display: inline-block; margin-right: 4px; }
+
     /* Contador de toques seguidos al mismo plato (+1, +2…) antes de agregarlos */
     .plato { position: relative; }
     .plato .contador {
