@@ -89,9 +89,10 @@ export async function mesas($vista, ctx) {
     while (usados.has(`mesa ${n}`)) n += 1;
     let creada = null;
     formulario("Crear mesa", `
-      <label>Nombre<input name="nombre" value="Mesa ${n}" autocomplete="off"></label>
-      <p class="suave" style="margin:0">Puede ser un número o el nombre del cliente. Se borra sola cuando se cobre su cuenta.</p>`,
-      async (c) => { creada = await api.crearMesa(c.nombre.trim()); },
+      <label>Nombre<input name="nombre" placeholder="Ej. Mesa ${n} o el nombre del cliente" autocomplete="off"></label>
+      <p class="suave" style="margin:0">Si lo dejas vacío se llama «Mesa ${n}». Se borra sola cuando se cobre su cuenta.</p>`,
+      // Si se deja vacío, se llama con el siguiente número libre.
+      async (c) => { creada = await api.crearMesa(c.nombre.trim() || `Mesa ${n}`); },
       { boton: "Crear y tomar pedido", alTerminar: () => ctx.ir(`pedido/${creada}`) });
   });
 }
