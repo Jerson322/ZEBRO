@@ -1131,12 +1131,30 @@ begin
   where cerrada_en is null and abierta_en < corte_del_dia();
 end $$;
 
+-- Cuentas vacías: al tocar una mesa libre se abre su cuenta aunque no se pida nada. Las que
+-- llevan más de 30 minutos abiertas sin ningún plato se borran (y la mesa temporal, si era una).
+-- Uso interno.
+create or replace function public.limpiar_cuentas_vacias() returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  with borradas as (
+    delete from pedidos p
+    where p.estado = 'abierto' and p.creado < now() - interval '30 minutes'
+      and not exists (select 1 from pedido_items i where i.pedido_id = p.id)
+      and not exists (select 1 from pagos x where x.pedido_id = p.id)
+    returning p.mesa_id
+  )
+  delete from mesas m where m.temporal and m.id in (select mesa_id from borradas)
+    and not exists (select 1 from pedidos o where o.mesa_id = m.id and o.estado = 'abierto');
+end $$;
+
 -- ¿Hay alguna caja abierta? (cualquiera del equipo puede preguntarlo; cierra antes las vencidas)
 create or replace function public.hay_caja_abierta() returns boolean
 language plpgsql security definer set search_path = public as $$
 begin
   perform exigir_rol('admin', 'cajero', 'mesero', 'cocina', 'domiciliario');
   perform cerrar_cajas_vencidas();
+  perform limpiar_cuentas_vacias();
   return exists (select 1 from cajas where cerrada_en is null);
 end $$;
 
@@ -1146,6 +1164,7 @@ language plpgsql security definer set search_path = public as $$
 begin
   perform exigir_rol('admin', 'cajero', 'mesero', 'cocina', 'domiciliario');
   perform cerrar_cajas_vencidas();
+  perform limpiar_cuentas_vacias();
   return (select to_jsonb(c) from cajas c where abierta_por = auth.uid() and cerrada_en is null);
 end $$;
 
@@ -1376,6 +1395,7 @@ revoke all on function public.cerrar_cuenta(uuid) from public, anon, authenticat
 revoke all on function public.cerrar_cajas_vencidas() from public, anon, authenticated;
 revoke all on function public.exigir_caja() from public, anon, authenticated;
 revoke all on function public.exigir_mi_caja() from public, anon, authenticated;
+revoke all on function public.limpiar_cuentas_vacias() from public, anon, authenticated;
 revoke all on function public.revisar_codigo_caja(text) from public, anon, authenticated;
 revoke all on function public.quien_autoriza(text) from public, anon, authenticated;
 revoke all on function public.exigir_clave(text) from public, anon, authenticated;

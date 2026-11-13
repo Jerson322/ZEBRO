@@ -15,9 +15,17 @@ const fechaHora = (iso) => new Date(iso).toLocaleString("es-CO", { dateStyle: "m
 
 // Lo de una caja: los pagos que se cobraron en ella y los gastos que se registraron en ella.
 export async function calcularCierre(caja) {
-  const [pagos, gastos, abiertos] = await Promise.all([
-    caja ? api.pagosDeCaja(caja.id) : [], caja ? api.gastosDeCaja(caja.id) : [], api.pedidosAbiertos(),
+  const [pagos, gastos, todasAbiertas, mesas] = await Promise.all([
+    caja ? api.pagosDeCaja(caja.id) : [], caja ? api.gastosDeCaja(caja.id) : [], api.pedidosAbiertos(), api.mesas(),
   ]);
+  // Cuentas abiertas que tienen algo pedido (las vacías no cuentan: se borran solas).
+  const abiertos = todasAbiertas.filter((p) => p.pedido_items.length).map((p) => ({
+    id: p.id,
+    nombre: p.tipo === "mesa" ? mesas.find((m) => m.id === p.mesa_id)?.nombre ?? p.mesa_nombre ?? "Mesa"
+      : `Domicilio #${p.numero_domicilio ?? p.numero} · ${p.cliente}`,
+    productos: p.pedido_items.reduce((s, i) => s + i.cantidad, 0),
+    total: suma(p.pedido_items, (i) => i.precio * i.cantidad) + (p.envio || 0),
+  }));
   // Todos los métodos de pago, aunque no tengan pagos (así se ve cada uno, incluso en $0).
   const metodos = [...new Set([...METODOS, ...pagos.map((x) => x.metodo)])]
     .map((m) => ({ metodo: m, pagos: pagos.filter((x) => x.metodo === m).length, valor: suma(pagos.filter((x) => x.metodo === m), (x) => x.valor) }));
@@ -64,6 +72,7 @@ export async function calcularCierre(caja) {
     ventasEfectivo,
     efectivoEsperado: base + ventasEfectivo - gastosEfectivo,
     abiertas: abiertos.length,
+    abiertasLista: abiertos,
   };
 }
 
@@ -106,7 +115,8 @@ export function ticketCierre(c, negocio, { usuario, dueno, contado, conteo, cort
     <hr>
     <div><strong>PRODUCTOS VENDIDOS</strong></div>
     ${c.productos.length ? c.productos.map((p) => fila(`${p.cantidad} × ${esc(p.nombre)}`, pesos(p.valor))).join("") : "<div>Ninguno</div>"}
-    ${c.abiertas ? `<hr><div class="t-centro"><strong>OJO: ${c.abiertas} cuenta(s) siguen abiertas sin cobrar</strong></div>` : ""}
+    ${c.abiertas ? `<hr><div class="t-centro"><strong>OJO: ${c.abiertas} cuenta(s) siguen abiertas sin cobrar</strong></div>
+      ${c.abiertasLista.map((x) => fila(esc(x.nombre).slice(0, 28), pesos(x.total))).join("")}` : ""}
     <hr>
     <div class="t-centro t-chico">Firma: ______________________</div>
   </div>`;
@@ -140,7 +150,11 @@ export async function abrirCierre(ctx, { conSalida = false, salir, caja: otra = 
   const $c = mostrar(`
     <h2>Cierre de caja${dueno ? ` · ${esc(dueno)}` : ""}</h2>
     <p class="suave" style="margin:0">Caja abierta el ${esc(fechaHora(c.desde))} con ${pesos(c.base)}. Solo cuenta lo que se cobró y se gastó en esta caja.</p>
-    ${c.abiertas ? `<p class="error" style="margin:0">Hay ${c.abiertas} cuenta(s) abiertas sin cobrar. Puedes cerrar igual, pero no entran en el cierre.</p>` : ""}
+    ${c.abiertas ? `<div class="panel" style="margin:0;border:1px solid var(--negativo)">
+      <p class="error" style="margin:0 0 6px"><strong>${c.abiertas} cuenta(s) siguen abiertas sin cobrar.</strong> Puedes cerrar igual, pero no entran en este cierre.</p>
+      ${c.abiertasLista.map((x) => `<div class="item"><span>${esc(x.nombre)} <small class="suave">· ${x.productos} producto${x.productos === 1 ? "" : "s"}</small></span>
+        <span class="num">${pesos(x.total)} <button type="button" class="chico" data-ir-cuenta="${x.id}">Ir</button></span></div>`).join("")}
+    </div>` : ""}
     <div class="tarjetas" style="margin:0">
       <div class="tarjeta"><small>Cobrado (${c.cuentas} cuentas)</small><strong>${pesos(c.ventas)}</strong></div>
       <div class="tarjeta"><small>Gastos</small><strong class="negativo">−${pesos(c.gastos)}</strong></div>
@@ -183,6 +197,12 @@ export async function abrirCierre(ctx, { conSalida = false, salir, caja: otra = 
   });
   const contadoFinal = () => (contado || Object.keys(conteo).length ? contado : null);
   $c.querySelector("#cancelar-cierre").addEventListener("click", cerrarDialogo);
+  // Ir a una cuenta abierta para cobrarla o anularla.
+  $c.querySelectorAll("[data-ir-cuenta]").forEach(($b) => $b.addEventListener("click", () => {
+    cerrarDialogo();
+    if (conSalida) return; // desde «Salir» solo se cierra la ventana
+    ctx.ir(`pedido/${$b.dataset.irCuenta}`);
+  }));
   $c.querySelector("#corte-cierre").addEventListener("click", async () => {
     cerrarDialogo();
     await imprimir(ticketCierre(c, ctx.negocio, { usuario: ctx.perfil.nombre, dueno, contado: contadoFinal(), conteo, corte: true }));
