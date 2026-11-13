@@ -6,6 +6,24 @@ const sb = configurado ? window.supabase?.createClient(SUPABASE_URL, SUPABASE_CL
 
 export const libreriaCargada = () => Boolean(sb);
 
+// Turno de la persona: viaja en la cabecera «x-turno» de cada pedido a la base de datos, que con él
+// sabe quién trabaja y con qué rol.
+export function usarTurno(token) {
+  const h = sb?.rest?.headers;
+  if (!h) return;
+  if (typeof h.set === "function") token ? h.set("x-turno", token) : h.delete("x-turno");
+  else if (token) h["x-turno"] = token;
+  else delete h["x-turno"];
+}
+export const hayPersonas = () => rpc("hay_personas");
+export const crearPrimeraPersona = (nombre, clave) => rpc("crear_primera_persona", { p_nombre: nombre, p_clave: clave });
+export const iniciarTurno = (clave) => rpc("iniciar_turno", { p_clave: clave });
+export const turnoActual = () => rpc("turno_actual");
+export const terminarTurno = () => rpc("terminar_turno");
+export const listaPersonas = () => rpc("lista_personas");
+export const guardarPersona = (p) =>
+  rpc("guardar_persona", { p_id: p.id ?? null, p_nombre: p.nombre, p_rol: p.rol, p_clave: p.clave || null, p_activo: p.activo ?? true });
+
 // Convierte los errores de Supabase en mensajes entendibles.
 function problema(error) {
   if (!error) return null;
@@ -78,7 +96,8 @@ export const insumos = () => todos("insumos");
 export const mesas = () => todos("mesas", "orden");
 export const equipo = () => resultado(sb.rpc("lista_equipo"));
 export const empleados = () => todos("empleados");
-export const miembros = () => todos("miembros");
+// Las personas del equipo (con «user_id» igual a su id, para las pantallas que buscan nombres).
+export const miembros = async () => (await listaPersonas()).map((p) => ({ ...p, user_id: p.id }));
 
 export const movimientos = (limite = 30) =>
   resultado(sb.from("movimientos").select("*").order("fecha", { ascending: false }).limit(limite));
@@ -213,17 +232,6 @@ export const moverInsumo = (insumoId, tipo, cantidad, costo, motivo) =>
     p_costo: costo === "" || costo == null ? null : Number(costo), p_motivo: motivo,
   });
 
-// Cuentas de acceso del equipo: las crea el servidor (api/equipo.js) con la clave secreta.
-export async function cuentaEquipo(cuerpo) {
-  const res = await fetch("/api/equipo", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${await token()}` },
-    body: JSON.stringify(cuerpo),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "No se pudo completar la acción");
-  return data;
-}
 
 // En vivo: avisa cuando cambia cualquier pedido o plato de un pedido.
 export function escucharPedidos(alCambiar) {

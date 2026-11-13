@@ -1,8 +1,7 @@
 // Ajustes (solo administrador): nombre, logo y datos del negocio para el panel y los tickets.
 import * as api from "../api.js";
-import { esc, aviso } from "../util.js";
+import { esc, aviso, tabla, opciones, formulario } from "../util.js";
 import { imprimir, ticketCuenta } from "../impresion.js";
-import { autorizar } from "../clave.js";
 
 export async function pintar($vista, ctx) {
   const n = ctx.negocio ?? {};
@@ -33,93 +32,32 @@ export async function pintar($vista, ctx) {
         <button type="submit" class="principal">Guardar</button>
       </div>
     </form>
-    <div class="panel" id="codigos-caja">
-      <h2>Códigos de caja</h2>
-      <p class="suave" style="margin:0 0 10px">Cada persona que cobra (administrador o cajero) tiene su propia caja. Con su código abre y cierra
-        su caja; sus cobros y sus gastos quedan en ella. Es obligatorio: sin código, esa persona no puede abrir su caja (tampoco tú: asígnate el tuyo).</p>
-      <div id="lista-codigos"><p class="suave">Cargando…</p></div>
-    </div>
-    <form class="panel formulario-plano" id="mi-clave">
-      <h2>Clave de autorización</h2>
-      <p class="suave" style="margin:0">Opcional. Si la pones, el sistema la pide para anular cuentas, quitar platos que ya se
-        enviaron a cocina y borrar productos, categorías, modificadores, insumos, mesas o gastos. Así nadie hace esos cambios
-        sin ti, aunque use tu sesión. También puedes darle una clave a alguien de confianza en «Empleados → Acceso».</p>
-      <p style="margin:0">${ctx.perfil.clave_hash ? "✓ Ya tienes una clave." : "Todavía no tienes clave."}</p>
-      <div class="fila">
-        <label>${ctx.perfil.clave_hash ? "Nueva clave" : "Clave"} (de 4 a 8 números)<input name="clave" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></label>
-        <label>Repítela<input name="repetir" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></label>
-      </div>
-      <div class="botones">
-        ${ctx.perfil.clave_hash ? `<button type="button" class="peligro" id="quitar-mi-clave">Quitar mi clave</button>` : ""}
-        <button type="submit" class="principal">${ctx.perfil.clave_hash ? "Cambiar clave" : "Guardar clave"}</button>
-      </div>
-    </form>`;
+    <div class="panel" id="personas">
+      <div class="encabezado" style="margin-bottom:8px"><h2 style="margin:0">Personas del equipo</h2>
+        <button class="principal" id="nueva-persona">+ Nueva persona</button></div>
+      <p class="suave" style="margin:0 0 10px">Cada persona entra con su clave en «¿Quién eres?» y ve su vista: <strong>Mesero</strong> (mesas y cocina, no cobra),
+        <strong>Cajero</strong> (mesas, domicilios, cocina y su caja), <strong>Domiciliario</strong> (domicilios y cocina) y
+        <strong>Administrador</strong> (todo). La clave de un administrador también autoriza anular y borrar.</p>
+      <div id="lista-personas"><p class="suave">Cargando…</p></div>
+    </div>`;
 
-  // Códigos de caja: una fila por cada administrador o cajero con acceso.
-  const pintarCodigos = async () => {
-    const $lista = $vista.querySelector("#lista-codigos");
+  // Personas del equipo: rol, nombre y clave.
+  const pintarPersonas = async () => {
+    const $lista = $vista.querySelector("#lista-personas");
     try {
-      const miembros = (await api.miembros()).filter((m) => m.activo && ["admin", "cajero"].includes(m.rol));
-      $lista.innerHTML = miembros.length ? miembros.map((m) => `<div class="fila-lista" style="flex-wrap:wrap;align-items:center">
-          <span style="flex:1;min-width:160px"><strong>${esc(m.nombre)}</strong> <small class="suave">${m.rol === "admin" ? "Administrador" : "Cajero"}</small><br>
-            <small>${m.codigo_caja_hash ? "✓ Tiene código" : "Sin código"}</small></span>
-          <input data-codigo="${m.user_id}" type="text" inputmode="numeric" maxlength="8" placeholder="Nuevo código" style="width:130px" autocomplete="off">
-          <button type="button" class="chico" data-generar="${m.user_id}">Generar</button>
-          <button type="button" class="chico principal" data-guardar-codigo="${m.user_id}">Guardar</button>
-          ${m.codigo_caja_hash ? `<button type="button" class="chico peligro" data-quitar-codigo="${m.user_id}">Quitar</button>` : ""}
-        </div>`).join("") : `<p class="suave">No hay administradores ni cajeros con acceso. Créalos en «Empleados».</p>`;
+      const personas = await api.listaPersonas();
+      $lista.innerHTML = tabla(["Nombre", "Rol", "Estado", ""], personas.map((x) => `<tr class="${x.activo ? "" : "inactivo"}">
+        <td class="ancho">${esc(x.nombre)}${x.id === ctx.perfil.user_id ? " <small class=\"suave\">(tú)</small>" : ""}</td>
+        <td>${ROLES[x.rol]}</td><td>${x.activo ? "Activa" : "<small class=\"etiqueta\">Desactivada</small>"}</td>
+        <td class="acciones"><button class="chico" data-editar-persona="${x.id}">Editar</button></td></tr>`), "Todavía no hay personas.");
+      $lista.querySelectorAll("[data-editar-persona]").forEach(($b) =>
+        $b.addEventListener("click", () => formularioPersona(ctx, personas.find((x) => x.id === $b.dataset.editarPersona), pintarPersonas)));
     } catch (error) {
       $lista.innerHTML = `<p class="error">${esc(error.message)}</p>`;
     }
   };
-  pintarCodigos();
-  $vista.querySelector("#codigos-caja").addEventListener("click", async (e) => {
-    const $b = e.target.closest("button");
-    if (!$b) return;
-    const usuario = $b.dataset.generar ?? $b.dataset.guardarCodigo ?? $b.dataset.quitarCodigo;
-    if (!usuario) return;
-    const $campo = $vista.querySelector(`[data-codigo="${usuario}"]`);
-    if ($b.dataset.generar) {
-      $campo.value = String(Math.floor(1000 + Math.random() * 9000));
-      return;
-    }
-    const codigo = $b.dataset.quitarCodigo ? "" : $campo.value.trim();
-    if ($b.dataset.guardarCodigo && !/^\d{4,8}$/.test(codigo)) return aviso("El código debe tener de 4 a 8 números");
-    if ($b.dataset.quitarCodigo && !confirm("¿Quitar el código de caja?")) return;
-    if ((await autorizar(ctx, "Cambiar un código de caja")) === null) return;
-    try {
-      await api.ponerCodigoCaja(usuario, codigo);
-      aviso(codigo ? `Código guardado: ${codigo}. Díselo a la persona.` : "Código quitado");
-      pintarCodigos();
-    } catch (error) {
-      aviso(error.message);
-    }
-  });
-
-  const $miClave = $vista.querySelector("#mi-clave");
-  const guardarMiClave = async (clave) => {
-    // Cambiar o quitar una clave que ya existe pide la clave actual (o la de otro autorizado).
-    if (ctx.perfil.clave_hash && (await autorizar(ctx, "Escribe tu clave actual")) === null) return;
-    try {
-      await api.ponerClave(ctx.perfil.user_id, clave);
-      ctx.perfil.clave_hash = clave ? "si" : null;
-      ctx.conClave = await api.hayClaves();
-      aviso(clave ? "Clave guardada" : "Clave quitada");
-      ctx.refrescar();
-    } catch (error) {
-      aviso(error.message);
-    }
-  };
-  $miClave.addEventListener("submit", (evento) => {
-    evento.preventDefault();
-    const { clave, repetir } = Object.fromEntries(new FormData($miClave));
-    if (!/^\d{4,8}$/.test(clave)) return aviso("La clave debe tener de 4 a 8 números");
-    if (clave !== repetir) return aviso("Las dos claves no coinciden");
-    guardarMiClave(clave);
-  });
-  $vista.querySelector("#quitar-mi-clave")?.addEventListener("click", () => {
-    if (confirm("¿Quitar tu clave de autorización?")) guardarMiClave("");
-  });
+  pintarPersonas();
+  $vista.querySelector("#nueva-persona").addEventListener("click", () => formularioPersona(ctx, null, pintarPersonas));
 
   const $form = $vista.querySelector("#datos-negocio");
   $form.addEventListener("submit", async (evento) => {
@@ -190,5 +128,40 @@ function achicarImagen(archivo, lado) {
       fallo(new Error("Imagen no válida"));
     };
     img.src = url;
+  });
+}
+
+const ROLES = { admin: "Administrador", cajero: "Cajero", mesero: "Mesero", domiciliario: "Domiciliario", cocina: "Cocina" };
+const OPCIONES_ROL = [["mesero", "Mesero · mesas y cocina (no cobra)"], ["cajero", "Cajero · mesas, domicilios, cocina y su caja"],
+  ["domiciliario", "Domiciliario · domicilios y cocina"], ["admin", "Administrador · todo"], ["cocina", "Cocina · solo cocina"]];
+
+// Crear o editar una persona: rol, nombre y clave (al editar, la clave se deja igual si se deja vacía).
+function formularioPersona(ctx, persona, alTerminar) {
+  const nueva = !persona;
+  let guardada = "";
+  let nombre = "";
+  formulario(nueva ? "Nueva persona" : `Editar · ${esc(persona.nombre)}`, `
+    <label>Rol<select name="rol">${opciones(OPCIONES_ROL, persona?.rol ?? "mesero")}</select></label>
+    <label>Nombre<input name="nombre" value="${esc(persona?.nombre ?? "")}" autocomplete="off"></label>
+    <div class="fila" style="align-items:end">
+      <label>${nueva ? "Clave" : "Nueva clave (vacío = la misma)"} · 4 a 8 números<input name="clave" type="text" inputmode="numeric" maxlength="8" autocomplete="off"></label>
+      <button type="button" id="generar-clave-persona">Generar</button>
+    </div>
+    ${nueva ? "" : `<label class="opcion"><input type="checkbox" name="activo"${persona.activo ? " checked" : ""}> Activa (puede entrar)</label>`}
+    <p class="suave" style="margin:0">Cada persona necesita una clave distinta. Díselas en privado.</p>`,
+    async (c) => {
+      const clave = (c.clave ?? "").trim();
+      if (clave && !/^\d{4,8}$/.test(clave)) throw new Error("La clave debe tener de 4 a 8 números");
+      if (nueva && !clave) throw new Error("Escribe o genera la clave");
+      await api.guardarPersona({ id: persona?.id, nombre: c.nombre, rol: c.rol, clave, activo: nueva ? true : Boolean(c.activo) });
+      guardada = clave;
+      nombre = c.nombre.trim();
+    },
+    { boton: nueva ? "Crear" : "Guardar", alTerminar: () => {
+      aviso(guardada ? `Listo. Clave de ${nombre}: ${guardada}` : "Cambios guardados");
+      alTerminar();
+    } });
+  document.getElementById("generar-clave-persona").addEventListener("click", () => {
+    document.querySelector('[name="clave"]').value = String(Math.floor(1000 + Math.random() * 9000));
   });
 }

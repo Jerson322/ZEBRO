@@ -59,12 +59,12 @@ const campoCodigo = (tiene) => (tiene
 // Ventana de apertura: se cuenta la base y se abre la caja propia.
 export async function abrirCaja(ctx, { alTerminar } = {}) {
   let total = 0;
-  const tiene = await api.tengoCodigoCaja().catch(() => false);
+  // La persona ya entró con su clave: no se le pide otro código para su caja.
+  const tiene = true;
   const $c = mostrar(`
     <h2>Abrir mi caja</h2>
     <p class="suave" style="margin:0">Cuenta el efectivo con el que empiezas (la base). Tus cobros y tus gastos quedan en tu caja.</p>
     <div id="contador-apertura" class="contador-efectivo"></div>
-    ${campoCodigo(tiene)}
     <div class="botones">
       <button type="button" id="apertura-luego">Ahora no</button>
       <button type="button" class="principal" id="apertura-abrir"${tiene ? "" : " disabled"}>Abrir caja con $0</button>

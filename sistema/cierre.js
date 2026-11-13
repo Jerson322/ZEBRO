@@ -138,7 +138,7 @@ export async function abrirCierre(ctx, { conSalida = false, salir, caja: otra = 
     }
     const propia = caja.abierta_por === ctx.perfil.user_id;
     dueno = dueno ?? (propia ? ctx.perfil.nombre : "");
-    pedirCodigo = propia;
+    pedirCodigo = false; // la persona ya entró con su clave
     c = await calcularCierre(caja);
   } catch (error) {
     aviso(error.message);

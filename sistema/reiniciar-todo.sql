@@ -3,7 +3,8 @@
 --
 -- BORRA: cuentas, ventas, domicilios, gastos, menú, categorías, recetas, modificadores, insumos,
 --        movimientos de inventario, mesas, empleados y sus usuarios de acceso, y los datos del negocio.
--- SE QUEDA: solo la cuenta del administrador, para que puedas seguir entrando.
+-- SE QUEDA: solo la cuenta del administrador (correo) y las personas administradoras con su clave,
+--           para que puedas seguir entrando.
 -- La numeración de ventas y domicilios vuelve a empezar en 1.
 --
 -- No se puede deshacer. Si se corta a la mitad, no cambia nada (todo pasa en un solo paso).
@@ -12,8 +13,11 @@ do $$
 begin
   -- Operación del servicio
   delete from public.pedido_items where true;
+  delete from public.pagos where true;
   delete from public.pedidos where true;
   delete from public.gastos where true;
+  delete from public.cajas where true;
+  delete from public.impresiones where true;
   delete from public.movimientos where true;
 
   -- Menú, recetas e inventario
@@ -26,7 +30,10 @@ begin
   delete from public.insumos where true;
   delete from public.mesas where true;
 
-  -- Equipo: se borran las fichas y los usuarios de acceso de todos menos el administrador.
+  -- Equipo: se borran las personas (menos los administradores), sus turnos, las fichas y los
+  -- usuarios de acceso de todos menos el administrador.
+  delete from public.turnos where true;
+  delete from public.personas where rol <> 'admin';
   delete from public.empleados where true;
   delete from auth.users
   where id in (select user_id from public.miembros where rol <> 'admin');

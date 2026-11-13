@@ -228,7 +228,7 @@ export async function domicilios($vista, ctx) {
       <label>Dirección (opcional)<input name="direccion"></label>
       <div class="fila">
         <label>Envío<select name="envio">${opciones(ENVIOS, 0)}</select></label>
-        <label>Domiciliario<select name="domiciliario"><option value="">Sin asignar</option>${opciones(equipo.map((e) => [e.id, e.nombre]))}</select></label>
+        <label>Domiciliario<select name="domiciliario"><option value="">Sin asignar</option>${opciones(equipo.filter((e) => e.cargo === "domiciliario").map((e) => [e.id, e.nombre]))}</select></label>
       </div>
       <label>Referencias<input name="notas" placeholder="Ej. casa azul, timbre dañado, paga con billete de 50"></label>`,
       async (c) => { creado = await api.crearDomicilio(c); },
@@ -298,7 +298,7 @@ export async function cuenta($vista, ctx, pedidoId) {
         ${p.entregado_en ? `<small class="suave">a las ${hora(p.entregado_en)}</small>` : ""}</p>` : ""}
       ${entrega ? `<div class="botones-domicilio" style="justify-content:flex-start;margin:0 0 12px">${botonesEntrega(p)}</div>` : ""}
       ${puedeCobrar(rol) && p.entrega !== "entregado" && p.estado !== "anulado" ? `<div class="fila">
-        <label>Domiciliario<select id="domiciliario"><option value="">Sin asignar</option>${opciones(equipo.map((e) => [e.id, e.nombre]), p.domiciliario_id ?? "")}</select></label>
+        <label>Domiciliario<select id="domiciliario"><option value="">Sin asignar</option>${opciones(equipo.filter((e) => e.cargo === "domiciliario").map((e) => [e.id, e.nombre]), p.domiciliario_id ?? "")}</select></label>
       </div>` : ""}
       ${entrega ? `<div class="fila">
         <label>Valor recibido del cliente (contra entrega)<input id="recibido" type="number" min="0" step="100" value="${p.recibido ?? ""}"></label>

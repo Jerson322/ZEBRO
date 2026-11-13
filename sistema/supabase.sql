@@ -24,10 +24,80 @@ alter table public.miembros add constraint miembros_rol_check
 create extension if not exists pgcrypto with schema extensions;
 alter table public.miembros add column if not exists clave_hash text;
 
-create or replace function public.rol_actual() returns text
+-- Personas y turnos ----------------------------------------------------------------
+-- El dispositivo entra una vez al día con el correo y la clave del administrador (miembros).
+-- Después, cada persona del equipo entra con su código (personas): eso abre un «turno» y el
+-- sistema muestra su vista. Todo lo que se hace queda a nombre de la persona del turno, y la
+-- base de datos revisa su rol. Los turnos vencen a las 3:00 a. m.
+create extension if not exists pgcrypto with schema extensions;
+
+create table if not exists public.personas (
+  id uuid primary key default gen_random_uuid(),
+  nombre text not null,
+  rol text not null check (rol in ('admin', 'cajero', 'mesero', 'cocina', 'domiciliario')),
+  clave_hash text not null,
+  activo boolean not null default true,
+  creado timestamptz not null default now()
+);
+
+create table if not exists public.turnos (
+  token uuid primary key default gen_random_uuid(),
+  persona_id uuid not null references public.personas (id) on delete cascade,
+  dispositivo uuid not null default auth.uid(),
+  inicio timestamptz not null default now(),
+  vence timestamptz not null
+);
+
+-- Solo se tocan con las funciones de abajo.
+alter table public.personas enable row level security;
+alter table public.turnos enable row level security;
+revoke all on public.personas from anon, authenticated;
+revoke all on public.turnos from anon, authenticated;
+grant all on public.personas to service_role;
+grant all on public.turnos to service_role;
+
+-- Rol del dispositivo (la cuenta con correo con la que se entró).
+create or replace function public.rol_dispositivo() returns text
 language sql stable security definer set search_path = public as $$
   select rol from miembros where user_id = auth.uid() and activo
 $$;
+
+-- El turno viene en la cabecera «x-turno» de cada pedido a la base de datos.
+create or replace function public.turno_token() returns uuid
+language plpgsql stable set search_path = public as $$
+declare
+  v_cabeceras text := current_setting('request.headers', true);
+begin
+  if v_cabeceras is null or v_cabeceras = '' then
+    return null;
+  end if;
+  return nullif(v_cabeceras::json ->> 'x-turno', '')::uuid;
+exception when others then
+  return null;
+end $$;
+
+-- La persona del turno (o null si no hay turno válido en este dispositivo).
+create or replace function public.persona_actual() returns uuid
+language sql stable security definer set search_path = public as $$
+  select t.persona_id from turnos t join personas p on p.id = t.persona_id
+  where t.token = turno_token() and t.dispositivo = auth.uid() and t.vence > now() and p.activo
+$$;
+
+-- Rol con el que se trabaja: el de la persona del turno. Sin cabeceras HTTP (avisos en vivo,
+-- tareas internas de la base de datos) vale el rol del dispositivo.
+create or replace function public.rol_actual() returns text
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_cabeceras text := current_setting('request.headers', true);
+begin
+  if rol_dispositivo() is null then
+    return null;
+  end if;
+  if v_cabeceras is null or v_cabeceras = '' then
+    return rol_dispositivo();
+  end if;
+  return (select p.rol from personas p where p.id = persona_actual());
+end $$;
 
 create or replace function public.exigir_rol(variadic permitidos text[]) returns void
 language plpgsql stable security definer set search_path = public as $$
@@ -40,14 +110,14 @@ end $$;
 -- ¿Hay al menos una clave de autorización? (si no, no se pide nunca)
 create or replace function public.hay_claves() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from miembros where activo and clave_hash is not null)
+  select exists (select 1 from personas where activo and rol = 'admin')
 $$;
 
 -- Nombre de quien autoriza con esa clave (null si no es válida). Uso interno.
 create or replace function public.quien_autoriza(p_clave text) returns text
 language sql stable security definer set search_path = public, extensions as $$
-  select nombre from miembros
-  where activo and clave_hash is not null and coalesce(p_clave, '') <> ''
+  select nombre from personas
+  where activo and rol = 'admin' and coalesce(p_clave, '') <> ''
     and clave_hash = extensions.crypt(p_clave, clave_hash)
   limit 1
 $$;
@@ -111,6 +181,131 @@ begin
     raise exception 'El sistema ya tiene administrador. Pídele que te dé acceso.';
   end if;
   insert into miembros (user_id, nombre, rol) values (auth.uid(), coalesce(nullif(trim(p_nombre), ''), 'Administrador'), 'admin');
+end $$;
+
+-- ¿Ya hay personas creadas? (si no, el administrador crea la suya al entrar por primera vez)
+create or replace function public.hay_personas() returns boolean
+language plpgsql security definer set search_path = public as $$
+begin
+  if rol_dispositivo() is null then
+    raise exception 'Este dispositivo no tiene acceso' using errcode = '42501';
+  end if;
+  return exists (select 1 from personas where activo);
+end $$;
+
+-- Revisa una clave (4 a 8 números) y que ninguna otra persona activa tenga la misma. Uso interno.
+create or replace function public.validar_clave_persona(p_clave text, p_excepto uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if coalesce(trim(p_clave), '') !~ '^[0-9]{4,8}$' then
+    raise exception 'La clave debe tener de 4 a 8 números';
+  end if;
+  if exists (select 1 from personas where activo and id is distinct from p_excepto
+             and clave_hash = extensions.crypt(trim(p_clave), clave_hash)) then
+    raise exception 'Esa clave ya la tiene otra persona: elige otra';
+  end if;
+end $$;
+
+-- Primera vez: el administrador del dispositivo crea su persona (nombre y clave).
+create or replace function public.crear_primera_persona(p_nombre text, p_clave text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if rol_dispositivo() <> 'admin' or rol_dispositivo() is null then
+    raise exception 'Solo el administrador puede hacer esto' using errcode = '42501';
+  end if;
+  if exists (select 1 from personas where activo) then
+    raise exception 'Ya hay personas creadas: entra con tu clave';
+  end if;
+  perform validar_clave_persona(p_clave, null);
+  insert into personas (nombre, rol, clave_hash)
+  values (coalesce(nullif(trim(p_nombre), ''), 'Administrador'), 'admin', extensions.crypt(trim(p_clave), extensions.gen_salt('bf')));
+end $$;
+
+-- Entrar con la clave: abre un turno hasta las 3:00 a. m. y devuelve la persona y su token.
+create or replace function public.iniciar_turno(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  v_persona personas;
+  v_token uuid;
+begin
+  if rol_dispositivo() is null then
+    raise exception 'Este dispositivo no tiene acceso' using errcode = '42501';
+  end if;
+  delete from turnos where vence < now();
+  select * into v_persona from personas
+  where activo and coalesce(p_clave, '') <> '' and clave_hash = extensions.crypt(trim(p_clave), clave_hash)
+  limit 1;
+  if not found then
+    perform pg_sleep(0.5); -- frena a quien pruebe claves al azar
+    raise exception 'Clave incorrecta' using errcode = '42501';
+  end if;
+  insert into turnos (persona_id, vence) values (v_persona.id, corte_del_dia() + interval '1 day')
+  returning token into v_token;
+  return jsonb_build_object('token', v_token, 'id', v_persona.id, 'nombre', v_persona.nombre, 'rol', v_persona.rol);
+end $$;
+
+-- La persona del turno actual (o null si venció o no hay).
+create or replace function public.turno_actual() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('id', p.id, 'nombre', p.nombre, 'rol', p.rol)
+  from personas p where p.id = persona_actual()
+$$;
+
+-- Cambiar de cuenta: se cierra el turno de este dispositivo.
+create or replace function public.terminar_turno() returns void
+language sql security definer set search_path = public as $$
+  delete from turnos where token = turno_token() and dispositivo = auth.uid()
+$$;
+
+-- Personas del equipo (para elegir domiciliario, ver nombres en las cajas, etc.).
+create or replace function public.lista_personas() returns table (id uuid, nombre text, rol text, activo boolean)
+language sql stable security definer set search_path = public as $$
+  select p.id, p.nombre, p.rol, p.activo from personas p
+  where rol_actual() is not null
+  order by p.activo desc, p.nombre
+$$;
+
+-- El administrador crea o edita una persona: rol, nombre y clave (la clave se puede dejar igual
+-- al editar). No se puede dejar el sistema sin ningún administrador activo.
+create or replace function public.guardar_persona(p_id uuid, p_nombre text, p_rol text, p_clave text, p_activo boolean)
+returns uuid
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  v_id uuid := p_id;
+begin
+  perform exigir_rol('admin');
+  if coalesce(trim(p_nombre), '') = '' then
+    raise exception 'Escribe el nombre';
+  end if;
+  if p_rol not in ('admin', 'cajero', 'mesero', 'cocina', 'domiciliario') then
+    raise exception 'Elige el rol';
+  end if;
+  if v_id is null and coalesce(trim(p_clave), '') = '' then
+    raise exception 'Escribe la clave';
+  end if;
+  if coalesce(trim(p_clave), '') <> '' then
+    perform validar_clave_persona(p_clave, v_id);
+  end if;
+  if v_id is null then
+    insert into personas (nombre, rol, clave_hash, activo)
+    values (trim(p_nombre), p_rol, extensions.crypt(trim(p_clave), extensions.gen_salt('bf')), coalesce(p_activo, true))
+    returning id into v_id;
+  else
+    update personas set nombre = trim(p_nombre), rol = p_rol, activo = coalesce(p_activo, activo),
+      clave_hash = case when coalesce(trim(p_clave), '') <> '' then extensions.crypt(trim(p_clave), extensions.gen_salt('bf')) else clave_hash end
+    where id = v_id;
+    if not found then
+      raise exception 'Esa persona no existe';
+    end if;
+  end if;
+  if not exists (select 1 from personas where activo and rol = 'admin') then
+    raise exception 'Debe quedar al menos un administrador activo';
+  end if;
+  -- Si se desactiva o cambia de clave, sus turnos abiertos se cierran.
+  if not coalesce(p_activo, true) or coalesce(trim(p_clave), '') <> '' then
+    delete from turnos where persona_id = v_id and token is distinct from turno_token();
+  end if;
+  return v_id;
 end $$;
 
 -- Menú, recetas e inventario --------------------------------------------------
@@ -391,7 +586,7 @@ end $$;
 -- Ficha de empleado de quien tiene la sesión (para saber cuáles domicilios son suyos).
 create or replace function public.mi_empleado() returns uuid
 language sql stable security definer set search_path = public as $$
-  select id from empleados where user_id = auth.uid() and activo limit 1
+  select persona_actual()
 $$;
 
 -- El domiciliario no ve ventas: solo las mesas abiertas (para tomar pedidos) y sus domicilios
@@ -448,16 +643,16 @@ drop policy if exists "caja lee" on public.gastos;
 create policy "caja lee" on public.gastos for select to authenticated using (rol_actual() in ('admin', 'cajero'));
 drop policy if exists "caja registra" on public.gastos;
 create policy "caja registra" on public.gastos for insert to authenticated
-  with check (rol_actual() in ('admin', 'cajero') and usuario = auth.uid());
+  with check (rol_actual() in ('admin', 'cajero') and usuario = persona_actual());
 drop policy if exists "admin borra" on public.gastos;
 create policy "admin borra" on public.gastos for delete to authenticated using (rol_actual() = 'admin');
 
 -- Nombres del equipo, para elegir domiciliario sin ver salarios ni documentos.
 create or replace function public.lista_equipo() returns table (id uuid, nombre text, cargo text)
 language sql stable security definer set search_path = public as $$
-  select e.id, e.nombre, e.cargo from empleados e
-  where e.activo and rol_actual() is not null
-  order by e.nombre
+  select p.id, p.nombre, p.rol from personas p
+  where p.activo and rol_actual() is not null
+  order by p.nombre
 $$;
 
 -- Operación del servicio ---------------------------------------------------------
@@ -613,7 +808,7 @@ begin
   perform domicilio_para_mi(p_pedido);
   update pedidos set novedades = concat_ws(E'\n', nullif(novedades, ''),
     to_char(now() at time zone 'America/Bogota', 'HH12:MI am') || ' · '
-      || coalesce((select nombre from miembros where user_id = auth.uid()), '') || ': ' || trim(p_texto))
+      || coalesce((select nombre from personas where id = persona_actual()), '') || ': ' || trim(p_texto))
   where id = p_pedido;
 end $$;
 
@@ -1104,7 +1299,7 @@ grant all on public.cajas to service_role;
 -- El administrador ve todas las cajas; el cajero, solo las suyas.
 drop policy if exists "caja lee" on public.cajas;
 create policy "caja lee" on public.cajas for select to authenticated
-  using (rol_actual() = 'admin' or (rol_actual() = 'cajero' and abierta_por = auth.uid()));
+  using (rol_actual() = 'admin' or (rol_actual() = 'cajero' and abierta_por = persona_actual()));
 
 -- Cada pago y cada gasto quedan en la caja de quien los registró.
 alter table public.pagos add column if not exists caja_id uuid references public.cajas (id) on delete set null;
@@ -1165,13 +1360,14 @@ begin
   perform exigir_rol('admin', 'cajero', 'mesero', 'cocina', 'domiciliario');
   perform cerrar_cajas_vencidas();
   perform limpiar_cuentas_vacias();
-  return (select to_jsonb(c) from cajas c where abierta_por = auth.uid() and cerrada_en is null);
+  return (select to_jsonb(c) from cajas c where abierta_por = persona_actual() and cerrada_en is null);
 end $$;
 
 -- ¿Quien pregunta tiene código de caja? (para saber si se le pide)
 create or replace function public.tengo_codigo_caja() returns boolean
 language sql stable security definer set search_path = public as $$
-  select coalesce((select codigo_caja_hash is not null from miembros where user_id = auth.uid()), false)
+  -- Ya no se usa: cada persona entra con su clave, que identifica su caja.
+  select true
 $$;
 
 -- Sin ninguna caja abierta no se toman pedidos. Uso interno.
@@ -1191,7 +1387,7 @@ declare
   v_caja uuid;
 begin
   perform cerrar_cajas_vencidas();
-  select id into v_caja from cajas where abierta_por = auth.uid() and cerrada_en is null;
+  select id into v_caja from cajas where abierta_por = persona_actual() and cerrada_en is null;
   if v_caja is null then
     raise exception 'Abre tu caja para poder cobrar (Caja del día → Abrir mi caja).';
   end if;
@@ -1201,18 +1397,10 @@ end $$;
 -- Revisa el código de caja de quien llama. Es obligatorio: sin código asignado no se abre ni se
 -- cierra la caja propia. Uso interno.
 create or replace function public.revisar_codigo_caja(p_codigo text) returns void
-language plpgsql security definer set search_path = public, extensions as $$
-declare
-  v_hash text;
+language plpgsql security definer set search_path = public as $$
 begin
-  select codigo_caja_hash into v_hash from miembros where user_id = auth.uid();
-  if v_hash is null then
-    raise exception 'No tienes código de caja. El administrador te lo asigna en Ajustes → Códigos de caja.';
-  end if;
-  if coalesce(p_codigo, '') = '' or v_hash <> extensions.crypt(p_codigo, v_hash) then
-    perform pg_sleep(0.5);
-    raise exception 'Código de caja incorrecto' using errcode = '42501';
-  end if;
+  -- Ya no se pide: la persona entró con su clave y su caja es la de su turno.
+  return;
 end $$;
 
 -- Gastos: quedan en la caja abierta de quien los registra.
@@ -1220,7 +1408,7 @@ create or replace function public.gasto_en_mi_caja() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
   if new.caja_id is null then
-    new.caja_id := (select id from cajas where abierta_por = auth.uid() and cerrada_en is null);
+    new.caja_id := (select id from cajas where abierta_por = persona_actual() and cerrada_en is null);
   end if;
   return new;
 end $$;
@@ -1240,10 +1428,10 @@ begin
   if p_base is null or p_base < 0 then
     raise exception 'La base no puede ser negativa';
   end if;
-  if exists (select 1 from cajas where abierta_por = auth.uid() and cerrada_en is null) then
+  if exists (select 1 from cajas where abierta_por = persona_actual() and cerrada_en is null) then
     raise exception 'Ya tienes tu caja abierta';
   end if;
-  insert into cajas (base, conteo_apertura) values (p_base, coalesce(p_conteo, '{}')) returning id into v_id;
+  insert into cajas (abierta_por, base, conteo_apertura) values (persona_actual(), p_base, coalesce(p_conteo, '{}')) returning id into v_id;
   return v_id;
 end $$;
 
@@ -1262,12 +1450,12 @@ begin
   if not found then
     raise exception 'Esa caja ya está cerrada';
   end if;
-  if v_caja.abierta_por = auth.uid() then
+  if v_caja.abierta_por = persona_actual() then
     perform revisar_codigo_caja(p_codigo);
   else
     perform exigir_rol('admin');
   end if;
-  update cajas set cerrada_en = now(), cerrada_por = auth.uid(), contado = p_contado,
+  update cajas set cerrada_en = now(), cerrada_por = persona_actual(), contado = p_contado,
     conteo_cierre = p_conteo, esperado = p_esperado, resumen = p_resumen
   where id = p_caja;
 end $$;
@@ -1305,7 +1493,7 @@ grant select, insert on public.impresiones to authenticated;
 grant all on public.impresiones to service_role;
 drop policy if exists "equipo envía" on public.impresiones;
 create policy "equipo envía" on public.impresiones for insert to authenticated
-  with check (rol_actual() is not null and creado_por = auth.uid());
+  with check (rol_actual() is not null and creado_por = persona_actual());
 -- Solo para que la comandera reciba el aviso en vivo; el contenido se toma con la función de abajo.
 drop policy if exists "equipo lee" on public.impresiones;
 create policy "equipo lee" on public.impresiones for select to authenticated using (rol_actual() is not null);
@@ -1361,7 +1549,7 @@ begin
     from tomados t
     join pedidos p on p.id = t.pedido_id
     left join mesas m on m.id = p.mesa_id
-    left join miembros mi on mi.user_id = p.abierto_por
+    left join personas mi on mi.id = p.abierto_por
     group by p.id, m.nombre, mi.nombre
   ) as comandas;
   return v_resultado;
@@ -1387,6 +1575,34 @@ begin
     execute format('grant execute on function public.%s to authenticated', f);
   end loop;
 end $$;
+
+-- Lo que se registra queda a nombre de la persona del turno.
+alter table public.pedidos alter column abierto_por set default public.persona_actual();
+alter table public.movimientos alter column usuario set default public.persona_actual();
+alter table public.gastos alter column usuario set default public.persona_actual();
+alter table public.pagos alter column usuario set default public.persona_actual();
+alter table public.cajas alter column abierta_por set default public.persona_actual();
+alter table public.impresiones alter column creado_por set default public.persona_actual();
+
+-- El domiciliario de un domicilio es una persona del equipo.
+alter table public.pedidos drop constraint if exists pedidos_domiciliario_id_fkey;
+update public.pedidos set domiciliario_id = null
+where domiciliario_id is not null and domiciliario_id not in (select id from public.personas);
+alter table public.pedidos add constraint pedidos_domiciliario_id_fkey
+  foreign key (domiciliario_id) references public.personas (id) on delete set null;
+
+do $$
+declare
+  f text;
+begin
+  foreach f in array array['rol_dispositivo()', 'turno_token()', 'persona_actual()', 'hay_personas()',
+    'crear_primera_persona(text, text)', 'iniciar_turno(text)', 'turno_actual()', 'terminar_turno()',
+    'lista_personas()', 'guardar_persona(uuid, text, text, text, boolean)'] loop
+    execute format('revoke all on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+  end loop;
+end $$;
+revoke all on function public.validar_clave_persona(text, uuid) from public, anon, authenticated;
 
 -- Funciones de uso interno: nadie las llama directo, solo otras funciones.
 revoke all on function public.domicilio_para_mi(uuid) from public, anon, authenticated;

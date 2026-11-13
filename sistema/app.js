@@ -6,7 +6,6 @@ import * as cocina from "./vistas/cocina.js";
 import * as menu from "./vistas/menu.js";
 import * as inventario from "./vistas/inventario.js";
 import * as finanzas from "./vistas/finanzas.js";
-import * as equipo from "./vistas/equipo.js";
 import * as ajustes from "./vistas/ajustes.js";
 import { preferencia, guardarPreferencia, imprimirAqui, ticketComanda } from "./impresion.js";
 import { iconos } from "./iconos.js";
@@ -15,14 +14,13 @@ import { revisarApertura } from "./caja.js";
 import * as caja from "./caja.js";
 
 const SECCIONES = [
-  { id: "mesas", nombre: "Mesas", vista: servicio.mesas, roles: ["admin", "cajero", "mesero", "domiciliario"], enVivo: true },
+  { id: "mesas", nombre: "Mesas", vista: servicio.mesas, roles: ["admin", "cajero", "mesero"], enVivo: true },
   { id: "domicilios", nombre: "Domicilios", vista: servicio.domicilios, roles: ["admin", "cajero", "domiciliario"], enVivo: true },
   { id: "cocina", nombre: "Cocina", vista: cocina.pintar, roles: ["admin", "cajero", "mesero", "cocina", "domiciliario"], enVivo: true },
   { id: "menu", nombre: "Menú y recetas", corto: "Menú", vista: menu.pintar, roles: ["admin"] },
   { id: "inventario", nombre: "Inventario", vista: inventario.pintar, roles: ["admin"] },
   { id: "caja", nombre: "Caja del día", corto: "Caja", vista: caja.pintar, roles: ["admin", "cajero"], enVivo: true },
   { id: "finanzas", nombre: "Ventas y gastos", corto: "Ventas", vista: finanzas.pintar, roles: ["admin"] },
-  { id: "equipo", nombre: "Empleados", corto: "Equipo", vista: equipo.pintar, roles: ["admin"] },
   { id: "ajustes", nombre: "Ajustes", vista: ajustes.pintar, roles: ["admin"] },
 ];
 const ROLES = { admin: "Administrador", cajero: "Cajero", mesero: "Mesero", cocina: "Cocina", domiciliario: "Domiciliario" };
@@ -54,6 +52,7 @@ let dejarDeEscuchar = null;
 let refrescoPendiente = false;
 let temporizadorEnVivo = null;
 let revisarComandas = null;
+let revisarDia = null;
 let buscandoComandas = false;
 
 // Si este equipo tiene la comandera, imprime lo que se envió a cocina y aún no se ha impreso.
@@ -115,7 +114,7 @@ async function pintarAhora() {
         ${iconos.impresora}<span>Comandera aquí</span></label>
       <div class="usuario"><span class="avatar">${esc(ctx.perfil.nombre.trim().charAt(0).toUpperCase())}</span>
         <span class="quien"><strong>${esc(ctx.perfil.nombre)}</strong><small>${ROLES[ctx.perfil.rol]}</small></span>
-        <button class="icono-boton" id="salir" title="Salir" aria-label="Salir">${iconos.salir}</button></div>
+        <button class="icono-boton" id="salir" title="Cambiar de cuenta" aria-label="Cambiar de cuenta">${iconos.salir}</button></div>
     </div>`;
   document.getElementById("salir").addEventListener("click", elegirSalida);
   document.getElementById("usar-comandera").addEventListener("change", (evento) => {
@@ -177,8 +176,33 @@ function pantallaError(mensaje) {
   document.getElementById("reintentar").addEventListener("click", iniciar);
 }
 
-function pantallaLogin() {
+// --- Entrada ---------------------------------------------------------------------------------
+// 1) El dispositivo entra con el correo y la clave del administrador; vale hasta las 3:00 a. m.
+// 2) Cada persona entra con su clave («¿Quién eres?»): abre su turno y ve su vista.
+// 3) «Cambiar de cuenta» cierra el turno y vuelve al teclado de claves.
+const CLAVE_SESION = "zebro-sesion-hasta";
+const CLAVE_TURNO = "zebro-turno";
+const guardado = {
+  leer: (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  poner: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } },
+};
+// Próximas 3:00 a. m. (hora de este equipo).
+function proximas3am() {
+  const d = new Date();
+  d.setHours(3, 0, 0, 0);
+  if (d <= new Date()) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+const sesionVencida = () => {
+  const hasta = guardado.leer(CLAVE_SESION);
+  return hasta != null && Date.now() >= hasta;
+};
+
+function pantallaLogin(mensaje = "") {
   pantalla(`<form id="acceso">
+    <p style="margin:0"><strong>Entrada del restaurante</strong></p>
+    <p class="suave" style="margin:0">Con el correo y la clave del administrador. Vale hasta las 3:00 a. m.; después de esa hora se vuelve a pedir.</p>
+    ${mensaje ? `<p class="error" style="margin:0">${esc(mensaje)}</p>` : ""}
     <label>Correo<input name="correo" type="email" autocomplete="username" required></label>
     <label>Clave<input name="clave" type="password" autocomplete="current-password" required></label>
     <p class="error" hidden></p>
@@ -188,13 +212,14 @@ function pantallaLogin() {
   $form.addEventListener("submit", async (evento) => {
     evento.preventDefault();
     const { correo, clave } = Object.fromEntries(new FormData($form));
-    const $boton = $form.querySelector("button");
+    const $boton = $form.querySelector('[type="submit"]');
     $boton.disabled = true;
     try {
       await api.iniciarSesion(correo, clave);
-      await entrar({ bienvenida: true });
+      guardado.poner(CLAVE_SESION, proximas3am());
+      await entrar();
     } catch (error) {
-      const $error = $form.querySelector(".error");
+      const $error = $form.querySelector(".error[hidden]") ?? $form.querySelector(".error");
       $error.textContent = error.message;
       $error.hidden = false;
       $boton.disabled = false;
@@ -202,9 +227,9 @@ function pantallaLogin() {
   });
 }
 
-// Usuario con sesión pero sin rol: o es el primero (se vuelve administrador) o falta que le den acceso.
+// Cuenta con correo pero sin acceso: o es el primero (queda como administrador) o no tiene acceso.
 function pantallaSinRol() {
-  pantalla(`<p>Tu usuario todavía no tiene acceso al sistema.</p>
+  pantalla(`<p>Esta cuenta todavía no tiene acceso al sistema.</p>
     <p class="suave">Si eres el dueño y es la primera vez, escribe tu nombre para quedar como administrador.</p>
     <form id="reclamar">
       <label>Tu nombre<input name="nombre" required></label>
@@ -212,7 +237,7 @@ function pantallaSinRol() {
       <button type="submit" class="principal">Soy el administrador</button>
     </form>
     <button id="salir-sin-rol">Salir</button>`);
-  document.getElementById("salir-sin-rol").addEventListener("click", salir);
+  document.getElementById("salir-sin-rol").addEventListener("click", cerrarSesionDispositivo);
   const $form = document.getElementById("reclamar");
   $form.addEventListener("submit", async (evento) => {
     evento.preventDefault();
@@ -227,31 +252,148 @@ function pantallaSinRol() {
   });
 }
 
-async function entrar({ bienvenida = false } = {}) {
+// Primera vez: el administrador crea su persona con nombre y clave.
+function pantallaPrimeraPersona(dispositivo) {
+  pantalla(`<form id="primera">
+    <p style="margin:0"><strong>Crea tu clave de administrador</strong></p>
+    <p class="suave" style="margin:0">Desde ahora cada persona entra con su clave. Empieza por la tuya; después, en
+      <strong>Ajustes → Personas del equipo</strong>, creas las de los demás (rol, nombre y clave).</p>
+    <label>Tu nombre<input name="nombre" value="${esc(dispositivo?.nombre ?? "")}" required></label>
+    <div class="fila">
+      <label>Clave (4 a 8 números)<input name="clave" type="password" inputmode="numeric" maxlength="8" required></label>
+      <label>Repítela<input name="repetir" type="password" inputmode="numeric" maxlength="8" required></label>
+    </div>
+    <p class="error" hidden></p>
+    <button type="submit" class="principal">Guardar y entrar</button>
+  </form>`);
+  const $form = document.getElementById("primera");
+  $form.addEventListener("submit", async (evento) => {
+    evento.preventDefault();
+    const { nombre, clave, repetir } = Object.fromEntries(new FormData($form));
+    const $error = $form.querySelector(".error");
+    try {
+      if (clave !== repetir) throw new Error("Las dos claves no coinciden");
+      await api.crearPrimeraPersona(nombre, clave);
+      await entrarConClave(clave);
+    } catch (error) {
+      $error.textContent = error.message;
+      $error.hidden = false;
+    }
+  });
+}
+
+// «¿Quién eres?»: teclado para la clave de la persona.
+function pantallaClave(mensaje = "") {
+  let clave = "";
+  pantalla(`<div class="teclado-clave">
+    <p style="margin:0;text-align:center"><strong>¿Quién eres?</strong></p>
+    <p class="suave" style="margin:0;text-align:center">Escribe tu clave para entrar</p>
+    <div class="puntos" id="puntos"></div>
+    <p class="error" id="error-clave" style="margin:0;text-align:center"${mensaje ? "" : " hidden"}>${esc(mensaje)}</p>
+    <div class="teclas">
+      ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" data-tecla="${n}">${n}</button>`).join("")}
+      <button type="button" data-tecla="borrar" aria-label="Borrar">⌫</button>
+      <button type="button" data-tecla="0">0</button>
+      <button type="button" class="principal" data-tecla="entrar">Entrar</button>
+    </div>
+    <button type="button" class="chico" id="cerrar-dispositivo" style="align-self:center">Cerrar la sesión del restaurante en este equipo</button>
+  </div>`);
+  const $puntos = document.getElementById("puntos");
+  const $error = document.getElementById("error-clave");
+  const pintarPuntos = () => ($puntos.textContent = "•".repeat(clave.length) || " ");
+  const enviar = async () => {
+    if (clave.length < 4) return;
+    try {
+      await entrarConClave(clave);
+    } catch (error) {
+      clave = "";
+      pintarPuntos();
+      $error.textContent = error.message;
+      $error.hidden = false;
+    }
+  };
+  const tecla = (t) => {
+    if (t === "borrar") clave = clave.slice(0, -1);
+    else if (t === "entrar") return enviar();
+    else if (clave.length < 8) clave += t;
+    $error.hidden = true;
+    pintarPuntos();
+  };
+  document.querySelectorAll("[data-tecla]").forEach(($b) => $b.addEventListener("click", () => tecla($b.dataset.tecla)));
+  // También con el teclado del computador.
+  const alTeclear = (e) => {
+    if (!document.getElementById("puntos")) return document.removeEventListener("keydown", alTeclear);
+    if (/^[0-9]$/.test(e.key)) tecla(e.key);
+    else if (e.key === "Backspace") tecla("borrar");
+    else if (e.key === "Enter") tecla("entrar");
+  };
+  document.addEventListener("keydown", alTeclear);
+  document.getElementById("cerrar-dispositivo").addEventListener("click", () => {
+    if (confirm("¿Cerrar la sesión del restaurante en este equipo? Para volver a entrar se necesita el correo y la clave del administrador.")) cerrarSesionDispositivo();
+  });
+  pintarPuntos();
+}
+
+async function entrarConClave(clave) {
+  const turno = await api.iniciarTurno(clave);
+  guardado.poner(CLAVE_TURNO, turno.token);
+  api.usarTurno(turno.token);
+  await empezar(turno, { bienvenida: true });
+}
+
+async function entrar() {
   try {
     const usuario = await api.usuarioActual();
     if (!usuario) return pantallaLogin();
-    ctx.perfil = await api.miPerfil(usuario.id);
-    if (!ctx.perfil || !ctx.perfil.activo) return pantallaSinRol();
-    await ctx.recargarMenu();
-    ctx.negocio = await api.negocio();
-    // ¿Se usan claves de autorización? (si nadie tiene clave, nada la pide)
-    ctx.conClave = await api.hayClaves().catch(() => false);
-    document.title = nombreNegocio();
-    if (bienvenida) mostrarBienvenida();
-    dejarDeEscuchar?.();
-    dejarDeEscuchar = api.escucharPedidos(alCambiarEnVivo);
-    // Respaldo por si se pierde algún aviso en vivo (por ejemplo, tras un corte de internet).
-    clearInterval(revisarComandas);
-    revisarComandas = setInterval(imprimirComandasPendientes, REVISAR_COMANDAS_CADA_MS);
-    imprimirComandasPendientes();
-    await pintar();
-    // Si no hay caja abierta, la caja (admin o cajero) la abre contando la base. Después de la
-    // bienvenida, para no taparla.
-    setTimeout(() => revisarApertura(ctx), bienvenida ? 3200 : 300);
+    if (sesionVencida()) {
+      await api.cerrarSesion();
+      guardado.poner(CLAVE_SESION, null);
+      guardado.poner(CLAVE_TURNO, null);
+      return pantallaLogin("El día terminó (3:00 a. m.): vuelve a entrar con el correo y la clave del administrador.");
+    }
+    if (guardado.leer(CLAVE_SESION) == null) guardado.poner(CLAVE_SESION, proximas3am());
+    const dispositivo = await api.miPerfil(usuario.id);
+    if (!dispositivo || !dispositivo.activo) return pantallaSinRol();
+    if (!(await api.hayPersonas())) return pantallaPrimeraPersona(dispositivo);
+    const token = guardado.leer(CLAVE_TURNO);
+    let persona = null;
+    if (token) {
+      api.usarTurno(token);
+      persona = await api.turnoActual().catch(() => null);
+    }
+    if (!persona) {
+      api.usarTurno(null);
+      guardado.poner(CLAVE_TURNO, null);
+      return pantallaClave();
+    }
+    await empezar(persona);
   } catch (error) {
     pantallaError(error.message || "No pudimos cargar el sistema. Revisa tu conexión.");
   }
+}
+
+// Con la persona del turno: su vista, el menú, los avisos en vivo y la comandera.
+async function empezar(persona, { bienvenida = false } = {}) {
+  ctx.perfil = { user_id: persona.id, nombre: persona.nombre, rol: persona.rol, activo: true };
+  await ctx.recargarMenu();
+  ctx.negocio = await api.negocio();
+  // ¿Se usan claves de autorización? (las de los administradores)
+  ctx.conClave = await api.hayClaves().catch(() => false);
+  document.title = nombreNegocio();
+  if (bienvenida) mostrarBienvenida();
+  dejarDeEscuchar?.();
+  dejarDeEscuchar = api.escucharPedidos(alCambiarEnVivo);
+  // Respaldo por si se pierde algún aviso en vivo (por ejemplo, tras un corte de internet).
+  clearInterval(revisarComandas);
+  revisarComandas = setInterval(imprimirComandasPendientes, REVISAR_COMANDAS_CADA_MS);
+  imprimirComandasPendientes();
+  // A las 3:00 a. m. termina el día: se vuelve a pedir la entrada del administrador.
+  clearInterval(revisarDia);
+  revisarDia = setInterval(() => { if (sesionVencida()) location.replace(location.pathname); }, 60000);
+  history.replaceState(null, "", location.pathname);
+  await pintar();
+  // Si quien cobra no tiene su caja abierta, se le ofrece abrirla (después de la bienvenida).
+  setTimeout(() => revisarApertura(ctx), bienvenida ? 3200 : 300);
 }
 
 // Nombre y logo del restaurante (Ajustes). Sin logo, la inicial del nombre.
@@ -292,14 +434,14 @@ function mostrarBienvenida() {
   });
 }
 
-// Al salir, la caja (administrador y cajero) puede cerrar el día: imprime el cierre de caja y
-// luego cierra la sesión. Los demás roles salen directo.
+// Cambiar de cuenta: quien cobra (administrador y cajero) puede antes cerrar su caja. Los demás
+// cambian directo.
 function elegirSalida() {
   if (!["admin", "cajero"].includes(ctx.perfil?.rol)) return salir();
-  const $c = mostrar(`<h2>¿Cómo quieres salir?</h2>
-    <button type="button" class="principal" id="salida-cierre">Cerrar caja del día</button>
+  const $c = mostrar(`<h2>Cambiar de cuenta</h2>
+    <button type="button" class="principal" id="salida-cierre">Cerrar mi caja y cambiar de cuenta</button>
     <p class="suave" style="margin:-6px 0 0">Cuentas el efectivo con los billetes y monedas, se guarda el cierre y se imprime el resumen: lo vendido, el dinero por método, los gastos y si la caja cuadra.</p>
-    <button type="button" id="salida-sesion">Solo cerrar sesión</button>
+    <button type="button" id="salida-sesion">Solo cambiar de cuenta</button>
     <button type="button" id="salida-cancelar">Cancelar</button>`);
   $c.querySelector("#salida-cierre").addEventListener("click", () => abrirCierre(ctx, { conSalida: true, salir }));
   $c.querySelector("#salida-sesion").addEventListener("click", () => {
@@ -309,15 +451,27 @@ function elegirSalida() {
   $c.querySelector("#salida-cancelar").addEventListener("click", cerrarDialogo);
 }
 
+// Cierra el turno de la persona y vuelve a «¿Quién eres?». Se recarga la página para que la
+// siguiente persona empiece en su pantalla y con la versión más reciente del sistema.
 async function salir() {
   dejarDeEscuchar?.();
   dejarDeEscuchar = null;
   clearInterval(revisarComandas);
   clearTimeout(temporizadorEnVivo);
-  await api.cerrarSesion();
+  await api.terminarTurno().catch(() => {});
+  guardado.poner(CLAVE_TURNO, null);
+  api.usarTurno(null);
   ctx.perfil = null;
-  // El siguiente usuario empieza en su pantalla principal, no en la del anterior, y con la
-  // versión más reciente del sistema: se recarga la página.
+  location.replace(location.pathname);
+}
+
+// Cierra la sesión del restaurante en este equipo (después se necesita el correo del administrador).
+async function cerrarSesionDispositivo() {
+  await api.terminarTurno().catch(() => {});
+  guardado.poner(CLAVE_TURNO, null);
+  guardado.poner(CLAVE_SESION, null);
+  api.usarTurno(null);
+  await api.cerrarSesion();
   location.replace(location.pathname);
 }
 
