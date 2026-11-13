@@ -468,6 +468,7 @@ declare
   v_id uuid;
 begin
   perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
+  perform exigir_caja();
   select id into v_id from pedidos where mesa_id = p_mesa and estado = 'abierto';
   if v_id is not null then
     return v_id;
@@ -491,6 +492,7 @@ declare
   v_id uuid;
 begin
   perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
+  perform exigir_caja();
   if coalesce(trim(p_nombre), '') = '' then
     raise exception 'Escribe el nombre de la mesa';
   end if;
@@ -525,6 +527,7 @@ declare
   v_id uuid;
 begin
   perform exigir_rol('admin', 'cajero');
+  perform exigir_caja();
   -- Solo el nombre es obligatorio; teléfono, dirección y lo demás se pueden dejar en blanco.
   if coalesce(trim(p_cliente), '') = '' then
     raise exception 'Escribe el nombre del cliente';
@@ -647,6 +650,7 @@ declare
   v_elegidas uuid[] := coalesce(p_opciones, '{}');
 begin
   perform exigir_rol('admin', 'cajero', 'mesero', 'domiciliario');
+  perform exigir_caja();
   if not exists (select 1 from pedidos where id = p_pedido and estado = 'abierto') then
     raise exception 'Esta cuenta ya está cerrada';
   end if;
@@ -882,6 +886,7 @@ declare
   v_resta integer;
 begin
   perform exigir_rol('admin', 'cajero');
+  perform exigir_caja();
   if p_metodo not in ('Efectivo', 'Tarjeta', 'Transferencia', 'Nequi', 'Daviplata') then
     raise exception 'Elige el método de pago';
   end if;
@@ -949,6 +954,7 @@ declare
   v_pago uuid;
 begin
   perform exigir_rol('admin', 'cajero');
+  perform exigir_caja();
   if p_metodo not in ('Efectivo', 'Tarjeta', 'Transferencia', 'Nequi', 'Daviplata') then
     raise exception 'Elige el método de pago';
   end if;
@@ -1094,12 +1100,47 @@ grant all on public.cajas to service_role;
 drop policy if exists "caja lee" on public.cajas;
 create policy "caja lee" on public.cajas for select to authenticated using (rol_actual() in ('admin', 'cajero'));
 
+-- El día del restaurante empieza a las 3:00 a. m. (hora de Colombia): devuelve el último corte.
+create or replace function public.corte_del_dia() returns timestamptz
+language sql stable set search_path = public as $$
+  select (date_trunc('day', (now() at time zone 'America/Bogota') - interval '3 hours') + interval '3 hours')
+         at time zone 'America/Bogota'
+$$;
+
+-- Una caja que sigue abierta a las 3:00 a. m. se cierra sola (sin conteo). Uso interno.
+create or replace function public.cerrar_cajas_vencidas() returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  update cajas set cerrada_en = corte_del_dia(), resumen = jsonb_build_object('automatico', true)
+  where cerrada_en is null and abierta_en < corte_del_dia();
+end $$;
+
+-- ¿Hay caja abierta? (cualquiera del equipo puede preguntarlo; cierra antes las vencidas)
+create or replace function public.hay_caja_abierta() returns boolean
+language plpgsql security definer set search_path = public as $$
+begin
+  perform exigir_rol('admin', 'cajero', 'mesero', 'cocina', 'domiciliario');
+  perform cerrar_cajas_vencidas();
+  return exists (select 1 from cajas where cerrada_en is null);
+end $$;
+
+-- Sin caja abierta no se toman pedidos ni se cobra. Uso interno.
+create or replace function public.exigir_caja() returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform cerrar_cajas_vencidas();
+  if not exists (select 1 from cajas where cerrada_en is null) then
+    raise exception 'La caja está cerrada. Para usar el sistema, el administrador o el cajero debe abrir la caja.';
+  end if;
+end $$;
+
 create or replace function public.abrir_caja(p_base integer, p_conteo jsonb) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare
   v_id uuid;
 begin
   perform exigir_rol('admin', 'cajero');
+  perform cerrar_cajas_vencidas();
   if p_base is null or p_base < 0 then
     raise exception 'La base no puede ser negativa';
   end if;
@@ -1216,7 +1257,7 @@ begin
     'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text, text)',
     'hay_claves()', 'verificar_clave(text)', 'poner_clave(uuid, text)',
     'cobrar_parte(uuid, jsonb, text)', 'abonar(uuid, integer, text)',
-    'abrir_caja(integer, jsonb)', 'cerrar_caja(integer, jsonb, integer, jsonb)', 'cambiar_para_llevar(uuid, boolean)',
+    'abrir_caja(integer, jsonb)', 'cerrar_caja(integer, jsonb, integer, jsonb)', 'hay_caja_abierta()', 'corte_del_dia()', 'cambiar_para_llevar(uuid, boolean)',
     'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()', 'impresiones_por_imprimir()',
     'asignar_numero_domicilio()'] loop
     execute format('revoke all on function public.%s from public, anon', f);
@@ -1228,6 +1269,8 @@ end $$;
 revoke all on function public.domicilio_para_mi(uuid) from public, anon, authenticated;
 revoke all on function public.solo_mesas_si_domiciliario(uuid) from public, anon, authenticated;
 revoke all on function public.cerrar_cuenta(uuid) from public, anon, authenticated;
+revoke all on function public.cerrar_cajas_vencidas() from public, anon, authenticated;
+revoke all on function public.exigir_caja() from public, anon, authenticated;
 revoke all on function public.quien_autoriza(text) from public, anon, authenticated;
 revoke all on function public.exigir_clave(text) from public, anon, authenticated;
 revoke all on function public.soltar_mesa(uuid) from public, anon, authenticated;

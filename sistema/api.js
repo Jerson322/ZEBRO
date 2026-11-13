@@ -183,7 +183,15 @@ export const cambiarParaLlevar = (pedidoId, paraLlevar) =>
   rpc("cambiar_para_llevar", { p_pedido: pedidoId, p_para_llevar: paraLlevar });
 export const anular = (pedidoId, motivo, clave) => rpc("anular", { p_pedido: pedidoId, p_motivo: motivo, p_clave: clave || null });
 // Caja: la que está abierta (o null), abrirla con la base y cerrarla con lo contado.
-export const cajaAbierta = () => resultado(sb.from("cajas").select("*").is("cerrada_en", null).maybeSingle());
+// La caja abierta (o null). Antes se cierran solas las que quedaron abiertas de antes de las 3:00 a. m.
+export const hayCajaAbierta = () => rpc("hay_caja_abierta");
+export async function cajaAbierta() {
+  await hayCajaAbierta().catch(() => {});
+  return resultado(sb.from("cajas").select("*").is("cerrada_en", null).maybeSingle());
+}
+export const corteDelDia = () => rpc("corte_del_dia");
+export const cajasEntre = (desde, hasta) =>
+  resultado(sb.from("cajas").select("*").gte("abierta_en", desde).lt("abierta_en", hasta).order("abierta_en"));
 export const abrirCaja = (base, conteo) => rpc("abrir_caja", { p_base: base, p_conteo: conteo });
 export const cerrarCaja = (contado, conteo, esperado, resumen) =>
   rpc("cerrar_caja", { p_contado: contado, p_conteo: conteo, p_esperado: esperado, p_resumen: resumen });

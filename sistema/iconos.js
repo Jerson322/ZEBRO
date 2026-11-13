@@ -11,6 +11,7 @@ export const iconos = {
   finanzas: svg('<path d="M4 20V11"/><path d="M10 20V5"/><path d="M16 20v-6"/><path d="M21 20H3"/>'),
   equipo: svg('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14.5A5 5 0 0 1 21.5 20"/>'),
   ajustes: svg('<path d="M4 6h9"/><path d="M19 6h1"/><circle cx="16" cy="6" r="2.5"/><path d="M4 12h2"/><path d="M12 12h8"/><circle cx="9" cy="12" r="2.5"/><path d="M4 18h11"/><circle cx="18" cy="18" r="2.5"/>'),
+  caja: svg('<rect x="3" y="7" width="18" height="12" rx="2"/><path d="M3 11h18"/><path d="M8 4h8l1 3H7z"/><circle cx="12" cy="15" r="1.5"/>'),
   salir: svg('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l5-5-5-5"/><path d="M15 12H4"/>'),
   impresora: svg('<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/>'),
   mas: svg('<path d="M12 5v14"/><path d="M5 12h14"/>'),

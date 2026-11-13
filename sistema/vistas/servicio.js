@@ -3,6 +3,7 @@ import * as api from "../api.js";
 import { esc, pesos, opciones, formulario, mostrar, cerrarDialogo, hora, minutosDesde, aviso, tarjeta as tarjetaResumen } from "../util.js";
 import { preferencia, guardarPreferencia, imprimir, ticketCuenta } from "../impresion.js";
 import { autorizar } from "../clave.js";
+import { pantallaCajaCerrada } from "../caja.js";
 
 const METODOS = ["Efectivo", "Tarjeta", "Transferencia", "Nequi", "Daviplata"];
 // Un domicilio solo tiene estos valores de envío.
@@ -48,6 +49,8 @@ const puedeCobrar = (rol) => rol === "admin" || rol === "cajero";
 // Mesas
 
 export async function mesas($vista, ctx) {
+  // Sin caja abierta no se toman pedidos.
+  if (!(await api.hayCajaAbierta())) return pantallaCajaCerrada($vista, ctx);
   const [lista, abiertos] = await Promise.all([api.mesas(), api.pedidosAbiertos()]);
   const porMesa = new Map(abiertos.filter((p) => p.mesa_id).map((p) => [p.mesa_id, p]));
   const tarjetas = lista.map((m) => {
@@ -145,6 +148,8 @@ function editarMesas(lista, ctx) {
 
 export async function domicilios($vista, ctx) {
   const rol = ctx.perfil.rol;
+  // Sin caja abierta no se toman domicilios (el domiciliario sí ve los que tiene por entregar).
+  if (rol !== "domiciliario" && !(await api.hayCajaAbierta())) return pantallaCajaCerrada($vista, ctx);
   const domiciliario = rol === "domiciliario";
   const yo = domiciliario ? await api.miEmpleado() : null;
   const [pendientes, equipo, historial] = await Promise.all([
@@ -253,6 +258,8 @@ export async function cuenta($vista, ctx, pedidoId) {
     return;
   }
   const rol = ctx.perfil.rol;
+  // Una cuenta abierta no se puede trabajar con la caja cerrada (las cerradas sí se pueden ver).
+  if (p.estado === "abierto" && rol !== "domiciliario" && !(await api.hayCajaAbierta())) return pantallaCajaCerrada($vista, ctx);
   const titulo = p.tipo === "mesa"
     ? listaMesas.find((m) => m.id === p.mesa_id)?.nombre ?? p.mesa_nombre ?? "Mesa"
     : `Domicilio #${p.numero_domicilio ?? p.numero}`;

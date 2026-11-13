@@ -12,6 +12,7 @@ import { preferencia, guardarPreferencia, imprimirAqui, ticketComanda } from "./
 import { iconos } from "./iconos.js";
 import { abrirCierre } from "./cierre.js";
 import { revisarApertura } from "./caja.js";
+import * as caja from "./caja.js";
 
 const SECCIONES = [
   { id: "mesas", nombre: "Mesas", vista: servicio.mesas, roles: ["admin", "cajero", "mesero", "domiciliario"], enVivo: true },
@@ -19,6 +20,7 @@ const SECCIONES = [
   { id: "cocina", nombre: "Cocina", vista: cocina.pintar, roles: ["admin", "cajero", "mesero", "cocina", "domiciliario"], enVivo: true },
   { id: "menu", nombre: "Menú y recetas", corto: "Menú", vista: menu.pintar, roles: ["admin"] },
   { id: "inventario", nombre: "Inventario", vista: inventario.pintar, roles: ["admin"] },
+  { id: "caja", nombre: "Caja del día", corto: "Caja", vista: caja.pintar, roles: ["admin", "cajero"], enVivo: true },
   { id: "finanzas", nombre: "Ventas y gastos", corto: "Ventas", vista: finanzas.pintar, roles: ["admin", "cajero"] },
   { id: "equipo", nombre: "Empleados", corto: "Equipo", vista: equipo.pintar, roles: ["admin"] },
   { id: "ajustes", nombre: "Ajustes", vista: ajustes.pintar, roles: ["admin"] },
