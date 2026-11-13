@@ -192,9 +192,17 @@ export async function cajaAbierta() {
 export const corteDelDia = () => rpc("corte_del_dia");
 export const cajasEntre = (desde, hasta) =>
   resultado(sb.from("cajas").select("*").gte("abierta_en", desde).lt("abierta_en", hasta).order("abierta_en"));
-export const abrirCaja = (base, conteo) => rpc("abrir_caja", { p_base: base, p_conteo: conteo });
-export const cerrarCaja = (contado, conteo, esperado, resumen) =>
-  rpc("cerrar_caja", { p_contado: contado, p_conteo: conteo, p_esperado: esperado, p_resumen: resumen });
+// Cada persona que cobra tiene su caja. miCaja: la abierta de quien tiene la sesión (o null).
+export const miCaja = () => rpc("mi_caja");
+export const tengoCodigoCaja = () => rpc("tengo_codigo_caja");
+export const abrirCaja = (base, conteo, codigo) => rpc("abrir_caja", { p_base: base, p_conteo: conteo, p_codigo: codigo || null });
+export const cerrarCaja = (cajaId, contado, conteo, esperado, resumen, codigo) =>
+  rpc("cerrar_caja", { p_caja: cajaId, p_contado: contado, p_conteo: conteo, p_esperado: esperado, p_resumen: resumen, p_codigo: codigo || null });
+export const ponerCodigoCaja = (usuarioId, codigo) => rpc("poner_codigo_caja", { p_usuario: usuarioId, p_codigo: codigo || "" });
+// Pagos cobrados en una caja (con su cuenta y sus platos) y gastos registrados en ella.
+export const pagosDeCaja = (cajaId) =>
+  resultado(sb.from("pagos").select("*, pedidos(*, pedido_items(*))").eq("caja_id", cajaId).order("fecha"));
+export const gastosDeCaja = (cajaId) => resultado(sb.from("gastos").select("*").eq("caja_id", cajaId).order("fecha"));
 // Clave de autorización.
 export const hayClaves = () => rpc("hay_claves");
 export const verificarClave = (clave) => rpc("verificar_clave", { p_clave: clave });

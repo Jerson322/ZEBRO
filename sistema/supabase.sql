@@ -875,6 +875,7 @@ end $$;
 create or replace function public.cobrar_parte(p_pedido uuid, p_items jsonb, p_metodo text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
+  v_caja uuid;
   v_pedido pedidos;
   v_sel record;
   v_item pedido_items;
@@ -886,7 +887,7 @@ declare
   v_resta integer;
 begin
   perform exigir_rol('admin', 'cajero');
-  perform exigir_caja();
+  v_caja := exigir_mi_caja();
   if p_metodo not in ('Efectivo', 'Tarjeta', 'Transferencia', 'Nequi', 'Daviplata') then
     raise exception 'Elige el método de pago';
   end if;
@@ -935,7 +936,7 @@ begin
   v_valor := case when v_cierra then v_resta else least(v_valor, v_resta) end;
   v_cierra := v_cierra or v_valor >= v_resta;
 
-  insert into pagos (pedido_id, metodo, valor) values (p_pedido, p_metodo, v_valor) returning id into v_pago;
+  insert into pagos (pedido_id, metodo, valor, caja_id) values (p_pedido, p_metodo, v_valor, v_caja) returning id into v_pago;
   update pedido_items set pago_id = v_pago where id = any (v_ids);
   if v_cierra then
     update pedido_items set pago_id = v_pago where pedido_id = p_pedido and pago_id is null;
@@ -949,12 +950,13 @@ end $$;
 create or replace function public.abonar(p_pedido uuid, p_valor integer, p_metodo text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
+  v_caja uuid;
   v_pedido pedidos;
   v_resta integer;
   v_pago uuid;
 begin
   perform exigir_rol('admin', 'cajero');
-  perform exigir_caja();
+  v_caja := exigir_mi_caja();
   if p_metodo not in ('Efectivo', 'Tarjeta', 'Transferencia', 'Nequi', 'Daviplata') then
     raise exception 'Elige el método de pago';
   end if;
@@ -973,7 +975,7 @@ begin
   if p_valor > v_resta then
     raise exception 'Solo falta por cobrar $%', to_char(v_resta, 'FM999G999G999');
   end if;
-  insert into pagos (pedido_id, metodo, valor) values (p_pedido, p_metodo, p_valor) returning id into v_pago;
+  insert into pagos (pedido_id, metodo, valor, caja_id) values (p_pedido, p_metodo, p_valor, v_caja) returning id into v_pago;
   if p_valor = v_resta then
     update pedido_items set pago_id = v_pago where pedido_id = p_pedido and pago_id is null;
     perform cerrar_cuenta(p_pedido);
@@ -1077,8 +1079,9 @@ drop policy if exists "admin cambia" on public.negocio;
 create policy "admin cambia" on public.negocio for update to authenticated
   using (rol_actual() = 'admin') with check (rol_actual() = 'admin');
 
--- Apertura y cierre de caja: con cuánto efectivo se abre (la base) y cuánto se contó al cerrar,
--- con el detalle por billete y moneda. Solo puede haber una caja abierta a la vez.
+-- Apertura y cierre de caja: cada persona que cobra (administrador o cajero) tiene su propia caja,
+-- con su base, sus pagos y sus gastos. Puede haber varias abiertas, pero una sola por persona.
+-- Se guarda con cuánto se abrió y cuánto se contó al cerrar, con el detalle por billete y moneda.
 create table if not exists public.cajas (
   id uuid primary key default gen_random_uuid(),
   abierta_en timestamptz not null default now(),
@@ -1092,13 +1095,26 @@ create table if not exists public.cajas (
   esperado integer,
   resumen jsonb
 );
-create unique index if not exists una_caja_abierta on public.cajas ((true)) where cerrada_en is null;
+drop index if exists public.una_caja_abierta;
+create unique index if not exists una_caja_abierta_por_persona on public.cajas (abierta_por) where cerrada_en is null;
 alter table public.cajas enable row level security;
 revoke all on public.cajas from anon;
 grant select on public.cajas to authenticated;
 grant all on public.cajas to service_role;
+-- El administrador ve todas las cajas; el cajero, solo las suyas.
 drop policy if exists "caja lee" on public.cajas;
-create policy "caja lee" on public.cajas for select to authenticated using (rol_actual() in ('admin', 'cajero'));
+create policy "caja lee" on public.cajas for select to authenticated
+  using (rol_actual() = 'admin' or (rol_actual() = 'cajero' and abierta_por = auth.uid()));
+
+-- Cada pago y cada gasto quedan en la caja de quien los registró.
+alter table public.pagos add column if not exists caja_id uuid references public.cajas (id) on delete set null;
+alter table public.gastos add column if not exists caja_id uuid references public.cajas (id) on delete set null;
+create index if not exists pagos_por_caja on public.pagos (caja_id);
+create index if not exists gastos_por_caja on public.gastos (caja_id);
+
+-- Código de caja de cada persona (lo asigna el administrador en Ajustes). Se pide para abrir y
+-- cerrar su caja. Se guarda cifrado. Es distinto de la clave de autorización.
+alter table public.miembros add column if not exists codigo_caja_hash text;
 
 -- El día del restaurante empieza a las 3:00 a. m. (hora de Colombia): devuelve el último corte.
 create or replace function public.corte_del_dia() returns timestamptz
@@ -1115,7 +1131,7 @@ begin
   where cerrada_en is null and abierta_en < corte_del_dia();
 end $$;
 
--- ¿Hay caja abierta? (cualquiera del equipo puede preguntarlo; cierra antes las vencidas)
+-- ¿Hay alguna caja abierta? (cualquiera del equipo puede preguntarlo; cierra antes las vencidas)
 create or replace function public.hay_caja_abierta() returns boolean
 language plpgsql security definer set search_path = public as $$
 begin
@@ -1124,47 +1140,130 @@ begin
   return exists (select 1 from cajas where cerrada_en is null);
 end $$;
 
--- Sin caja abierta no se toman pedidos ni se cobra. Uso interno.
+-- La caja abierta de quien pregunta (o null).
+create or replace function public.mi_caja() returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform exigir_rol('admin', 'cajero', 'mesero', 'cocina', 'domiciliario');
+  perform cerrar_cajas_vencidas();
+  return (select to_jsonb(c) from cajas c where abierta_por = auth.uid() and cerrada_en is null);
+end $$;
+
+-- ¿Quien pregunta tiene código de caja? (para saber si se le pide)
+create or replace function public.tengo_codigo_caja() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select codigo_caja_hash is not null from miembros where user_id = auth.uid()), false)
+$$;
+
+-- Sin ninguna caja abierta no se toman pedidos. Uso interno.
 create or replace function public.exigir_caja() returns void
 language plpgsql security definer set search_path = public as $$
 begin
   perform cerrar_cajas_vencidas();
   if not exists (select 1 from cajas where cerrada_en is null) then
-    raise exception 'La caja está cerrada. Para usar el sistema, el administrador o el cajero debe abrir la caja.';
+    raise exception 'La caja está cerrada. Para usar el sistema, el administrador o el cajero debe abrir su caja.';
   end if;
 end $$;
 
-create or replace function public.abrir_caja(p_base integer, p_conteo jsonb) returns uuid
+-- Para cobrar hay que tener la caja propia abierta: el pago queda en ella. Uso interno.
+create or replace function public.exigir_mi_caja() returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_caja uuid;
+begin
+  perform cerrar_cajas_vencidas();
+  select id into v_caja from cajas where abierta_por = auth.uid() and cerrada_en is null;
+  if v_caja is null then
+    raise exception 'Abre tu caja para poder cobrar (Caja del día → Abrir mi caja).';
+  end if;
+  return v_caja;
+end $$;
+
+-- Revisa el código de caja de quien llama, si tiene uno. Uso interno.
+create or replace function public.revisar_codigo_caja(p_codigo text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  v_hash text;
+begin
+  select codigo_caja_hash into v_hash from miembros where user_id = auth.uid();
+  if v_hash is not null and (coalesce(p_codigo, '') = '' or v_hash <> extensions.crypt(p_codigo, v_hash)) then
+    perform pg_sleep(0.5);
+    raise exception 'Código de caja incorrecto' using errcode = '42501';
+  end if;
+end $$;
+
+-- Gastos: quedan en la caja abierta de quien los registra.
+create or replace function public.gasto_en_mi_caja() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.caja_id is null then
+    new.caja_id := (select id from cajas where abierta_por = auth.uid() and cerrada_en is null);
+  end if;
+  return new;
+end $$;
+drop trigger if exists gasto_en_mi_caja on public.gastos;
+create trigger gasto_en_mi_caja before insert on public.gastos
+  for each row execute function public.gasto_en_mi_caja();
+
+drop function if exists public.abrir_caja(integer, jsonb);
+create or replace function public.abrir_caja(p_base integer, p_conteo jsonb, p_codigo text default null) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare
   v_id uuid;
 begin
   perform exigir_rol('admin', 'cajero');
   perform cerrar_cajas_vencidas();
+  perform revisar_codigo_caja(p_codigo);
   if p_base is null or p_base < 0 then
     raise exception 'La base no puede ser negativa';
   end if;
-  if exists (select 1 from cajas where cerrada_en is null) then
-    raise exception 'La caja ya está abierta';
+  if exists (select 1 from cajas where abierta_por = auth.uid() and cerrada_en is null) then
+    raise exception 'Ya tienes tu caja abierta';
   end if;
   insert into cajas (base, conteo_apertura) values (p_base, coalesce(p_conteo, '{}')) returning id into v_id;
   return v_id;
 end $$;
 
--- Cierra la caja abierta guardando lo contado y el resumen. Si nadie la abrió, se guarda un
--- cierre con base 0 desde el comienzo del día.
-create or replace function public.cerrar_caja(p_contado integer, p_conteo jsonb, p_esperado integer, p_resumen jsonb)
-returns void
+-- Cierra una caja guardando lo contado y el resumen. Cada uno cierra la suya (con su código);
+-- el administrador puede cerrar la de otro (por ejemplo, si se fue sin cerrarla).
+drop function if exists public.cerrar_caja(integer, jsonb, integer, jsonb);
+create or replace function public.cerrar_caja(
+  p_caja uuid, p_contado integer, p_conteo jsonb, p_esperado integer, p_resumen jsonb, p_codigo text default null
+) returns void
 language plpgsql security definer set search_path = public as $$
+declare
+  v_caja cajas;
 begin
   perform exigir_rol('admin', 'cajero');
+  select * into v_caja from cajas where id = p_caja and cerrada_en is null for update;
+  if not found then
+    raise exception 'Esa caja ya está cerrada';
+  end if;
+  if v_caja.abierta_por = auth.uid() then
+    perform revisar_codigo_caja(p_codigo);
+  else
+    perform exigir_rol('admin');
+  end if;
   update cajas set cerrada_en = now(), cerrada_por = auth.uid(), contado = p_contado,
     conteo_cierre = p_conteo, esperado = p_esperado, resumen = p_resumen
-  where cerrada_en is null;
+  where id = p_caja;
+end $$;
+
+-- El administrador pone, cambia o quita (vacío) el código de caja de alguien. Solo números, 4 a 8.
+create or replace function public.poner_codigo_caja(p_usuario uuid, p_codigo text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform exigir_rol('admin');
+  if coalesce(trim(p_codigo), '') = '' then
+    update miembros set codigo_caja_hash = null where user_id = p_usuario;
+    return;
+  end if;
+  if trim(p_codigo) !~ '^[0-9]{4,8}$' then
+    raise exception 'El código debe tener de 4 a 8 números';
+  end if;
+  update miembros set codigo_caja_hash = extensions.crypt(trim(p_codigo), extensions.gen_salt('bf')) where user_id = p_usuario;
   if not found then
-    insert into cajas (abierta_en, base, cerrada_en, cerrada_por, contado, conteo_cierre, esperado, resumen)
-    values (date_trunc('day', now() at time zone 'America/Bogota') at time zone 'America/Bogota', 0,
-            now(), auth.uid(), p_contado, p_conteo, p_esperado, p_resumen);
+    raise exception 'Ese usuario no tiene acceso al sistema';
   end if;
 end $$;
 
@@ -1257,7 +1356,8 @@ begin
     'marcar_items(uuid, text, text)', 'entregar_pedido(uuid)', 'cobrar(uuid, text, integer)', 'anular(uuid, text, text)',
     'hay_claves()', 'verificar_clave(text)', 'poner_clave(uuid, text)',
     'cobrar_parte(uuid, jsonb, text)', 'abonar(uuid, integer, text)',
-    'abrir_caja(integer, jsonb)', 'cerrar_caja(integer, jsonb, integer, jsonb)', 'hay_caja_abierta()', 'corte_del_dia()', 'cambiar_para_llevar(uuid, boolean)',
+    'abrir_caja(integer, jsonb, text)', 'cerrar_caja(uuid, integer, jsonb, integer, jsonb, text)', 'hay_caja_abierta()',
+    'corte_del_dia()', 'mi_caja()', 'tengo_codigo_caja()', 'poner_codigo_caja(uuid, text)', 'cambiar_para_llevar(uuid, boolean)',
     'mover_insumo(uuid, text, numeric, numeric, text)', 'comandas_por_imprimir()', 'impresiones_por_imprimir()',
     'asignar_numero_domicilio()'] loop
     execute format('revoke all on function public.%s from public, anon', f);
@@ -1271,6 +1371,8 @@ revoke all on function public.solo_mesas_si_domiciliario(uuid) from public, anon
 revoke all on function public.cerrar_cuenta(uuid) from public, anon, authenticated;
 revoke all on function public.cerrar_cajas_vencidas() from public, anon, authenticated;
 revoke all on function public.exigir_caja() from public, anon, authenticated;
+revoke all on function public.exigir_mi_caja() from public, anon, authenticated;
+revoke all on function public.revisar_codigo_caja(text) from public, anon, authenticated;
 revoke all on function public.quien_autoriza(text) from public, anon, authenticated;
 revoke all on function public.exigir_clave(text) from public, anon, authenticated;
 revoke all on function public.soltar_mesa(uuid) from public, anon, authenticated;

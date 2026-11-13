@@ -33,6 +33,12 @@ export async function pintar($vista, ctx) {
         <button type="submit" class="principal">Guardar</button>
       </div>
     </form>
+    <div class="panel" id="codigos-caja">
+      <h2>Códigos de caja</h2>
+      <p class="suave" style="margin:0 0 10px">Cada persona que cobra (administrador o cajero) tiene su propia caja. Con su código abre y cierra
+        su caja; sus cobros y sus gastos quedan en ella. Es opcional: sin código, abre y cierra sin que se lo pidan.</p>
+      <div id="lista-codigos"><p class="suave">Cargando…</p></div>
+    </div>
     <form class="panel formulario-plano" id="mi-clave">
       <h2>Clave de autorización</h2>
       <p class="suave" style="margin:0">Opcional. Si la pones, el sistema la pide para anular cuentas, quitar platos que ya se
@@ -48,6 +54,47 @@ export async function pintar($vista, ctx) {
         <button type="submit" class="principal">${ctx.perfil.clave_hash ? "Cambiar clave" : "Guardar clave"}</button>
       </div>
     </form>`;
+
+  // Códigos de caja: una fila por cada administrador o cajero con acceso.
+  const pintarCodigos = async () => {
+    const $lista = $vista.querySelector("#lista-codigos");
+    try {
+      const miembros = (await api.miembros()).filter((m) => m.activo && ["admin", "cajero"].includes(m.rol));
+      $lista.innerHTML = miembros.length ? miembros.map((m) => `<div class="fila-lista" style="flex-wrap:wrap;align-items:center">
+          <span style="flex:1;min-width:160px"><strong>${esc(m.nombre)}</strong> <small class="suave">${m.rol === "admin" ? "Administrador" : "Cajero"}</small><br>
+            <small>${m.codigo_caja_hash ? "✓ Tiene código" : "Sin código"}</small></span>
+          <input data-codigo="${m.user_id}" type="text" inputmode="numeric" maxlength="8" placeholder="Nuevo código" style="width:130px" autocomplete="off">
+          <button type="button" class="chico" data-generar="${m.user_id}">Generar</button>
+          <button type="button" class="chico principal" data-guardar-codigo="${m.user_id}">Guardar</button>
+          ${m.codigo_caja_hash ? `<button type="button" class="chico peligro" data-quitar-codigo="${m.user_id}">Quitar</button>` : ""}
+        </div>`).join("") : `<p class="suave">No hay administradores ni cajeros con acceso. Créalos en «Empleados».</p>`;
+    } catch (error) {
+      $lista.innerHTML = `<p class="error">${esc(error.message)}</p>`;
+    }
+  };
+  pintarCodigos();
+  $vista.querySelector("#codigos-caja").addEventListener("click", async (e) => {
+    const $b = e.target.closest("button");
+    if (!$b) return;
+    const usuario = $b.dataset.generar ?? $b.dataset.guardarCodigo ?? $b.dataset.quitarCodigo;
+    if (!usuario) return;
+    const $campo = $vista.querySelector(`[data-codigo="${usuario}"]`);
+    if ($b.dataset.generar) {
+      $campo.value = String(Math.floor(1000 + Math.random() * 9000));
+      return;
+    }
+    const codigo = $b.dataset.quitarCodigo ? "" : $campo.value.trim();
+    if ($b.dataset.guardarCodigo && !/^\d{4,8}$/.test(codigo)) return aviso("El código debe tener de 4 a 8 números");
+    if ($b.dataset.quitarCodigo && !confirm("¿Quitar el código de caja?")) return;
+    if ((await autorizar(ctx, "Cambiar un código de caja")) === null) return;
+    try {
+      await api.ponerCodigoCaja(usuario, codigo);
+      aviso(codigo ? `Código guardado: ${codigo}. Díselo a la persona.` : "Código quitado");
+      pintarCodigos();
+    } catch (error) {
+      aviso(error.message);
+    }
+  });
 
   const $miClave = $vista.querySelector("#mi-clave");
   const guardarMiClave = async (clave) => {

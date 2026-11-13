@@ -21,7 +21,7 @@ const SECCIONES = [
   { id: "menu", nombre: "Menú y recetas", corto: "Menú", vista: menu.pintar, roles: ["admin"] },
   { id: "inventario", nombre: "Inventario", vista: inventario.pintar, roles: ["admin"] },
   { id: "caja", nombre: "Caja del día", corto: "Caja", vista: caja.pintar, roles: ["admin", "cajero"], enVivo: true },
-  { id: "finanzas", nombre: "Ventas y gastos", corto: "Ventas", vista: finanzas.pintar, roles: ["admin", "cajero"] },
+  { id: "finanzas", nombre: "Ventas y gastos", corto: "Ventas", vista: finanzas.pintar, roles: ["admin"] },
   { id: "equipo", nombre: "Empleados", corto: "Equipo", vista: equipo.pintar, roles: ["admin"] },
   { id: "ajustes", nombre: "Ajustes", vista: ajustes.pintar, roles: ["admin"] },
 ];

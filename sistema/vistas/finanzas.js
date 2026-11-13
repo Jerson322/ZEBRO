@@ -18,7 +18,7 @@ export async function pintar($vista, ctx) {
     api.pedidosCerrados(periodo.desde, periodo.hasta),
     api.gastos(periodo.desde, periodo.hasta),
     api.mesas(),
-    api.cajaAbierta().catch(() => null),
+    api.miCaja().catch(() => null),
   ]);
   const pagados = cerrados.filter((p) => p.estado === "pagado");
   const suma = (lista, f) => lista.reduce((s, x) => s + Number(f(x) || 0), 0);
@@ -43,12 +43,12 @@ export async function pintar($vista, ctx) {
   $vista.innerHTML = `
     <div class="encabezado"><h1>Ventas y gastos</h1>
       <div class="botones-domicilio" style="margin:0">
-        ${caja ? "" : `<button id="abrir-caja">Abrir caja</button>`}
+        ${caja ? "" : `<button id="abrir-caja">Abrir mi caja</button>`}
         <button id="cierre-caja">Cierre de caja</button>
         <button class="principal" id="nuevo-gasto">Registrar gasto</button></div></div>
     <p class="suave" style="margin:-8px 0 16px">${caja
-      ? `🟢 Caja abierta desde el ${new Date(caja.abierta_en).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })} con base ${pesos(caja.base)}`
-      : "⚪ La caja no está abierta. Ábrela contando la base con «Abrir caja»."}</p>
+      ? `🟢 Tu caja está abierta desde el ${new Date(caja.abierta_en).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })} con base ${pesos(caja.base)}. Las cajas de todos están en «Caja del día».`
+      : "⚪ Tu caja no está abierta. Ábrela contando la base con «Abrir mi caja». Las cajas de todos están en «Caja del día»."}</p>
     <div class="filtros">
       <label>Desde<input type="date" data-periodo="desde" value="${periodo.desde}"></label>
       <label>Hasta<input type="date" data-periodo="hasta" value="${periodo.hasta}"></label>
