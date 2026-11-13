@@ -229,7 +229,8 @@ export async function pintar($vista, ctx) {
       <div class="tarjetas">
         ${tarjeta("Base", pesos(actual.base))}
         ${tarjeta(`Cobrado (${actual.cuentas})`, pesos(actual.ventas))}
-        ${tarjeta("Gastos", pesos(actual.gastos))}
+        ${tarjeta("Gastos", `−${pesos(actual.gastos)}`, "negativo")}
+        ${tarjeta("Neto (cobrado − gastos)", pesos(actual.ventas - actual.gastos))}
         ${tarjeta("Efectivo que debe haber", pesos(actual.efectivoEsperado))}
       </div>
       <div class="columnas" style="margin-bottom:0">
@@ -239,10 +240,11 @@ export async function pintar($vista, ctx) {
         <div><strong>Efectivo en caja</strong>
           ${fila("Base de apertura", pesos(actual.base))}
           ${fila("+ Cobros en efectivo", pesos(actual.ventasEfectivo))}
-          ${fila("− Gastos en efectivo", pesos(actual.gastosEfectivo))}
+          ${fila("− Gastos en efectivo", `−${pesos(actual.gastosEfectivo)}`)}
           ${fila("Debe haber", pesos(actual.efectivoEsperado), true)}
           ${actual.gastosLista.length ? `<p style="margin:12px 0 4px"><strong>Mis gastos</strong></p>
-            ${actual.gastosLista.map((g) => fila(`${esc(g.categoria)}${g.descripcion ? ` · <small class="suave">${esc(g.descripcion)}</small>` : ""} <small class="suave">(${esc(g.metodo)})</small>`, pesos(g.valor))).join("")}` : ""}</div>
+            ${actual.gastosLista.map((g) => fila(`${esc(g.categoria)}${g.descripcion ? ` · <small class="suave">${esc(g.descripcion)}</small>` : ""} <small class="suave">(${esc(g.metodo)})</small>`, `−${pesos(g.valor)}`)).join("")}
+            <p class="suave" style="margin:6px 0 0">Solo los gastos pagados en <strong>efectivo</strong> se restan del efectivo que debe haber en la caja.</p>` : ""}</div>
       </div></div>`
       : `<div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
           <span>🔒 <strong>Tu caja está cerrada.</strong> <span class="suave">Ábrela para tomar pedidos, cobrar y registrar gastos.</span></span>

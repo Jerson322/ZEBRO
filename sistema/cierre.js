@@ -87,16 +87,18 @@ export function ticketCierre(c, negocio, { usuario, dueno, contado, conteo, cort
     <hr>
     <div><strong>DINERO POR MÉTODO</strong></div>
     ${c.metodos.map((m) => fila(`${esc(m.metodo)} (${m.pagos})`, pesos(m.valor))).join("")}
-    ${fila("TOTAL RECIBIDO", pesos(c.metodos.reduce((s, m) => s + m.valor, 0)), "t-total")}
+    ${fila("TOTAL RECIBIDO", pesos(c.ventas), "t-total")}
     <hr>
     <div><strong>GASTOS</strong></div>
-    ${c.gastosLista.length ? c.gastosLista.map((g) => fila(esc(`${g.categoria}${g.descripcion ? ` · ${g.descripcion}` : ""}`).slice(0, 34), pesos(g.valor))).join("") : "<div>Sin gastos</div>"}
-    ${fila("Total gastos", pesos(c.gastos), "t-total")}
+    ${c.gastosLista.length ? c.gastosLista.map((g) => fila(`${esc(`${g.categoria}${g.descripcion ? ` · ${g.descripcion}` : ""}`).slice(0, 26)} (${esc(g.metodo)})`, `−${pesos(g.valor)}`)).join("") : "<div>Sin gastos</div>"}
+    ${fila("Total gastos", `−${pesos(c.gastos)}`, "t-total")}
+    <hr>
+    ${fila("NETO (recibido − gastos)", pesos(c.ventas - c.gastos), "t-total")}
     <hr>
     <div><strong>EFECTIVO EN CAJA</strong></div>
     ${fila("Base de apertura", pesos(c.base))}
     ${fila("+ Cobros en efectivo", pesos(c.ventasEfectivo))}
-    ${fila("− Gastos en efectivo", pesos(c.gastosEfectivo))}
+    ${fila("− Gastos en efectivo", `−${pesos(c.gastosEfectivo)}`)}
     ${fila("Debe haber", pesos(c.efectivoEsperado), "t-total")}
     ${contado != null ? fila("Contado en caja", pesos(contado), "t-total") : fila("Contado en caja", "No se contó")}
     ${contado != null ? `<div class="t-centro t-resultado">${resultadoCaja(diferencia)}</div>` : ""}
@@ -141,7 +143,8 @@ export async function abrirCierre(ctx, { conSalida = false, salir, caja: otra = 
     ${c.abiertas ? `<p class="error" style="margin:0">Hay ${c.abiertas} cuenta(s) abiertas sin cobrar. Puedes cerrar igual, pero no entran en el cierre.</p>` : ""}
     <div class="tarjetas" style="margin:0">
       <div class="tarjeta"><small>Cobrado (${c.cuentas} cuentas)</small><strong>${pesos(c.ventas)}</strong></div>
-      <div class="tarjeta"><small>Gastos</small><strong>${pesos(c.gastos)}</strong></div>
+      <div class="tarjeta"><small>Gastos</small><strong class="negativo">−${pesos(c.gastos)}</strong></div>
+      <div class="tarjeta"><small>Neto (cobrado − gastos)</small><strong>${pesos(c.ventas - c.gastos)}</strong></div>
     </div>
     <div>
       <strong>Dinero por método</strong>
@@ -152,7 +155,7 @@ export async function abrirCierre(ctx, { conSalida = false, salir, caja: otra = 
       <strong>Efectivo en caja</strong>
       ${fila("Base de apertura", pesos(c.base))}
       ${fila("+ Cobros en efectivo", pesos(c.ventasEfectivo))}
-      ${fila("− Gastos pagados en efectivo", pesos(c.gastosEfectivo))}
+      ${fila("− Gastos pagados en efectivo", `−${pesos(c.gastosEfectivo)}`)}
       ${fila("Debe haber", pesos(c.efectivoEsperado), true)}
     </div>
     <div><strong>Cuenta el efectivo de la caja</strong>
