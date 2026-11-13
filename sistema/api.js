@@ -209,6 +209,8 @@ export async function cajaAbierta() {
   return resultado(sb.from("cajas").select("*").is("cerrada_en", null).maybeSingle());
 }
 export const corteDelDia = () => rpc("corte_del_dia");
+// Desde cuándo cuenta el día actual (3:00 a. m. o el último cierre del día, lo que sea después).
+export const inicioPeriodo = () => rpc("inicio_periodo");
 export const cajasEntre = (desde, hasta) =>
   resultado(sb.from("cajas").select("*").gte("abierta_en", desde).lt("abierta_en", hasta).order("abierta_en"));
 // Cada persona que cobra tiene su caja. miCaja: la abierta de quien tiene la sesión (o null).

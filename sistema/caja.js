@@ -194,8 +194,11 @@ export async function pintar($vista, ctx) {
   const corte = new Date(await api.corteDelDia());
   const hoyNegocio = diaLocal(corte);
   const dia = vistaCaja.dia ?? hoyNegocio;
-  const inicio = new Date(`${dia}T03:00:00`);
-  const fin = new Date(inicio.getTime() + 86400000);
+  // Hoy: desde el último cierre del día (si lo hubo); otro día: de 3:00 a. m. a 3:00 a. m.
+  const inicioDia = new Date(`${dia}T03:00:00`);
+  const reinicio = dia === hoyNegocio ? new Date(await api.inicioPeriodo()) : inicioDia;
+  const inicio = reinicio > inicioDia ? reinicio : inicioDia;
+  const fin = new Date(inicioDia.getTime() + 86400000);
   const [mia, cajas, miembros, tengoCodigo] = await Promise.all([
     api.miCaja(), api.cajasEntre(inicio.toISOString(), fin.toISOString()), api.miembros().catch(() => []), api.tengoCodigoCaja().catch(() => false),
   ]);
@@ -221,6 +224,7 @@ export async function pintar($vista, ctx) {
       <div class="botones-domicilio" style="margin:0;align-items:end">
         <label style="width:auto">Día<input type="date" id="dia-caja" value="${dia}" max="${hoyNegocio}"></label>
         ${admin ? `<button class="principal" id="cierre-dia">Cierre del día</button>` : ""}</div></div>
+    ${inicio > inicioDia ? `<p style="margin:-8px 0 12px">🔄 <strong>Día reiniciado</strong> con el cierre del día de las ${hora(inicio.toISOString())}: aquí se ve solo lo de después. Lo anterior sigue en «Ventas y gastos».</p>` : ""}
     <p class="suave" style="margin:-8px 0 16px">Cada persona que cobra tiene su caja: sus cobros y sus gastos quedan en ella. El día va de 3:00 a. m. a 3:00 a. m.;
       si una caja sigue abierta a esa hora, se cierra sola. Al volver a abrir, es una caja nueva desde cero.</p>
     ${dia === hoyNegocio ? (actual ? `<div class="panel">
@@ -278,7 +282,7 @@ export async function pintar($vista, ctx) {
   });
   $vista.querySelector("#cerrar-caja")?.addEventListener("click", () => abrirCierre(ctx));
   // Cierre del día (administrador): junta todas las cajas del día elegido.
-  $vista.querySelector("#cierre-dia")?.addEventListener("click", () => abrirCierreDia(ctx, dia));
+  $vista.querySelector("#cierre-dia")?.addEventListener("click", () => abrirCierreDia(ctx, dia, inicio.toISOString()));
   $vista.querySelector("#gasto-caja")?.addEventListener("click", () => registrarGasto(ctx));
   $vista.querySelector("#abrir-caja-dia")?.addEventListener("click", () => abrirCaja(ctx, { alTerminar: () => ctx.refrescar() }));
   $vista.querySelectorAll("[data-cerrar-otra]").forEach(($b) => $b.addEventListener("click", () => {

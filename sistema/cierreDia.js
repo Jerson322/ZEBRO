@@ -11,9 +11,11 @@ const suma = (lista, f) => lista.reduce((s, x) => s + Number(f(x) || 0), 0);
 const hora = (iso) => (iso ? new Date(iso).toLocaleTimeString("es-CO", { hour: "numeric", minute: "2-digit" }) : "");
 const textoDia = (dia) => new Date(`${dia}T12:00:00`).toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-async function resumenDia(dia) {
-  const inicio = new Date(`${dia}T03:00:00`);
-  const fin = new Date(inicio.getTime() + 86400000);
+// desde: si ya hubo un cierre del día hoy, solo lo de después.
+async function resumenDia(dia, desde = null) {
+  const inicioDia = new Date(`${dia}T03:00:00`);
+  const inicio = desde ? new Date(desde) : inicioDia;
+  const fin = new Date(inicioDia.getTime() + 86400000);
   const [cajas, personas, gastosDia] = await Promise.all([
     api.cajasEntre(inicio.toISOString(), fin.toISOString()), api.listaPersonas(), api.gastos(dia, dia),
   ]);
@@ -88,10 +90,10 @@ function ticketCierreDia(r, negocio, usuario) {
   </div>`;
 }
 
-export async function abrirCierreDia(ctx, dia) {
+export async function abrirCierreDia(ctx, dia, desde = null) {
   let r;
   try {
-    r = await resumenDia(dia);
+    r = await resumenDia(dia, desde);
   } catch (error) {
     aviso(error.message);
     return;
@@ -99,7 +101,8 @@ export async function abrirCierreDia(ctx, dia) {
   const fila = (izq, der, fuerte = false) => `<div class="item"><span>${izq}</span><span class="num">${fuerte ? `<strong>${der}</strong>` : der}</span></div>`;
   const $c = mostrar(`
     <h2>Cierre del día · ${esc(textoDia(dia))}</h2>
-    <p class="suave" style="margin:0">Junta todas las cajas del día. Solo el administrador lo hace, con su clave.</p>
+    <p class="suave" style="margin:0">Junta todas las cajas del día. Solo el administrador lo hace, con su clave. Al cerrar, <strong>todo se reinicia</strong>:
+      se cierran todas las cajas y los domicilios vuelven a #1. «Ventas y gastos» no se toca.</p>
     <div class="tarjetas" style="margin:0">
       <div class="tarjeta"><small>Cobrado en el día</small><strong>${pesos(r.cobrado)}</strong></div>
       <div class="tarjeta"><small>Gastos</small><strong class="negativo">−${pesos(r.gastos)}</strong></div>
@@ -114,8 +117,7 @@ export async function abrirCierreDia(ctx, dia) {
         ${r.filas.map((f) => fila(`${esc(f.persona)} <small class="suave">${hora(f.abierta_en)}–${f.cerrada_en ? hora(f.cerrada_en) : "abierta"}</small><br>
           <small class="${f.diferencia < 0 ? "negativo" : "suave"}">${esc(f.resultado)}</small>`, pesos(f.cobrado))).join("") || `<p class="suave">No hubo cajas.</p>`}</div>
     </div>
-    ${r.cajasAbiertas ? `<label class="opcion" style="color:var(--negativo)"><input type="checkbox" id="cerrar-cajas" checked>
-      Cerrar también las ${r.cajasAbiertas} caja(s) que siguen abiertas (quedan sin conteo)</label>` : ""}
+    ${r.cajasAbiertas ? `<p class="error" style="margin:0">${r.cajasAbiertas} caja(s) siguen abiertas: se cerrarán con el cierre del día (sin conteo). Si quieres contarlas, ciérralas antes una por una.</p>` : ""}
     ${r.abiertas.length ? `<p class="error" style="margin:0">${r.abiertas.length} cuenta(s) siguen sin cobrar: ${r.abiertas.map((x) => esc(x.nombre)).join(", ")}.</p>` : ""}
     <label>Tu clave de administrador<input id="clave-dia" type="password" inputmode="numeric" maxlength="8" autocomplete="off"
       placeholder="••••" style="font-size:22px;letter-spacing:6px;text-align:center"></label>
@@ -142,7 +144,7 @@ export async function abrirCierreDia(ctx, dia) {
       await api.cerrarDia(dia, clave, {
         cobrado: r.cobrado, gastos: r.gastos, neto: r.neto, metodos: r.metodos, cajas: r.filas.length,
         sobrantes: r.sobrantes, faltantes: r.faltantes,
-      }, $c.querySelector("#cerrar-cajas")?.checked);
+      }, true);
     } catch (error) {
       aviso(error.message);
       $b.disabled = false;
@@ -150,7 +152,7 @@ export async function abrirCierreDia(ctx, dia) {
       return;
     }
     cerrarDialogo();
-    aviso("Día cerrado");
+    aviso("Día cerrado: todo quedó en cero para empezar de nuevo");
     if (imprimirlo) await imprimir(ticketCierreDia(r, ctx.negocio, ctx.perfil.nombre));
     if (excel) {
       try {

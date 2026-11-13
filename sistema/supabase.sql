@@ -450,10 +450,11 @@ alter table public.pedidos add column if not exists novedades text not null defa
 alter table public.pedidos add column if not exists recibido integer check (recibido is null or recibido >= 0);
 alter table public.pedidos add column if not exists entregado_en timestamptz;
 
--- Los domicilios tienen su propia numeración, aparte del número de la venta,
--- y vuelve a empezar en #1 cada día (hora de Colombia).
+-- Los domicilios tienen su propia numeración, aparte del número de la venta, y vuelve a empezar
+-- en #1 cada día: a las 3:00 a. m. o con el cierre del día del administrador.
 alter table public.pedidos add column if not exists numero_domicilio bigint;
 drop sequence if exists public.numero_domicilio_seq;
+-- Solo la primera vez (domicilios viejos sin número): se numeran por día.
 with por_dia as (
   select id, row_number() over (
     partition by (creado at time zone 'America/Bogota')::date order by creado, numero
@@ -461,7 +462,7 @@ with por_dia as (
   from public.pedidos where tipo = 'domicilio'
 )
 update public.pedidos p set numero_domicilio = d.n
-from por_dia d where p.id = d.id and p.numero_domicilio is distinct from d.n;
+from por_dia d where p.id = d.id and p.numero_domicilio is null;
 
 -- Cada domicilio nuevo recibe su número del día al guardarse, venga de donde venga.
 create or replace function public.asignar_numero_domicilio() returns trigger
@@ -472,8 +473,7 @@ begin
     perform pg_advisory_xact_lock(hashtext('numero_domicilio'));
     select coalesce(max(numero_domicilio), 0) + 1 into new.numero_domicilio
     from pedidos
-    where tipo = 'domicilio'
-      and (creado at time zone 'America/Bogota')::date = (new.creado at time zone 'America/Bogota')::date;
+    where tipo = 'domicilio' and creado >= inicio_periodo();
   end if;
   return new;
 end $$;
@@ -1494,6 +1494,12 @@ grant all on public.cierres_dia to service_role;
 drop policy if exists "admin lee" on public.cierres_dia;
 create policy "admin lee" on public.cierres_dia for select to authenticated using (rol_actual() = 'admin');
 
+-- Desde cuándo cuenta el día actual: lo último entre las 3:00 a. m. y el último cierre del día.
+create or replace function public.inicio_periodo() returns timestamptz
+language sql stable security definer set search_path = public as $$
+  select greatest(corte_del_dia(), coalesce((select max(cerrado_en) from cierres_dia), '-infinity'::timestamptz))
+$$;
+
 create or replace function public.cerrar_dia(p_dia date, p_clave text, p_resumen jsonb, p_cerrar_cajas boolean)
 returns uuid
 language plpgsql security definer set search_path = public as $$
@@ -1506,11 +1512,11 @@ begin
     perform pg_sleep(0.5);
     raise exception 'Clave incorrecta' using errcode = '42501';
   end if;
-  if p_cerrar_cajas then
-    update cajas set cerrada_en = now(), cerrada_por = persona_actual(),
-      resumen = coalesce(resumen, '{}') || jsonb_build_object('cierre_dia', true)
-    where cerrada_en is null;
-  end if;
+  -- Con el cierre del día se reinicia todo: se cierran todas las cajas que sigan abiertas y la
+  -- numeración de domicilios vuelve a #1. Ventas y gastos (las estadísticas) no se tocan.
+  update cajas set cerrada_en = now(), cerrada_por = persona_actual(),
+    resumen = coalesce(resumen, '{}') || jsonb_build_object('cierre_dia', true)
+  where cerrada_en is null;
   insert into cierres_dia (dia, cerrado_por, resumen) values (p_dia, persona_actual(), coalesce(p_resumen, '{}'))
   returning id into v_id;
   return v_id;
@@ -1635,7 +1641,7 @@ declare
 begin
   foreach f in array array['rol_dispositivo()', 'turno_token()', 'persona_actual()', 'hay_personas()',
     'crear_primera_persona(text, text)', 'iniciar_turno(text)', 'turno_actual()', 'terminar_turno()',
-    'lista_personas()', 'guardar_persona(uuid, text, text, text, boolean)', 'cerrar_dia(date, text, jsonb, boolean)'] loop
+    'lista_personas()', 'guardar_persona(uuid, text, text, text, boolean)', 'cerrar_dia(date, text, jsonb, boolean)', 'inicio_periodo()'] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);
   end loop;
