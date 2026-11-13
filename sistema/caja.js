@@ -3,6 +3,7 @@
 import * as api from "./api.js";
 import { esc, pesos, mostrar, cerrarDialogo, aviso, tabla, tarjeta, formulario, opciones, hoy } from "./util.js";
 import { calcularCierre, abrirCierre } from "./cierre.js";
+import { abrirCierreDia } from "./cierreDia.js";
 import { imprimir } from "./impresion.js";
 
 export const BILLETES = [100000, 50000, 20000, 10000, 5000, 2000];
@@ -217,7 +218,9 @@ export async function pintar($vista, ctx) {
 
   $vista.innerHTML = `
     <div class="encabezado"><h1>Caja del día</h1>
-      <label style="width:auto">Día<input type="date" id="dia-caja" value="${dia}" max="${hoyNegocio}"></label></div>
+      <div class="botones-domicilio" style="margin:0;align-items:end">
+        <label style="width:auto">Día<input type="date" id="dia-caja" value="${dia}" max="${hoyNegocio}"></label>
+        ${admin ? `<button class="principal" id="cierre-dia">Cierre del día</button>` : ""}</div></div>
     <p class="suave" style="margin:-8px 0 16px">Cada persona que cobra tiene su caja: sus cobros y sus gastos quedan en ella. El día va de 3:00 a. m. a 3:00 a. m.;
       si una caja sigue abierta a esa hora, se cierra sola. Al volver a abrir, es una caja nueva desde cero.</p>
     ${dia === hoyNegocio ? (actual ? `<div class="panel">
@@ -274,6 +277,8 @@ export async function pintar($vista, ctx) {
     ctx.refrescar();
   });
   $vista.querySelector("#cerrar-caja")?.addEventListener("click", () => abrirCierre(ctx));
+  // Cierre del día (administrador): junta todas las cajas del día elegido.
+  $vista.querySelector("#cierre-dia")?.addEventListener("click", () => abrirCierreDia(ctx, dia));
   $vista.querySelector("#gasto-caja")?.addEventListener("click", () => registrarGasto(ctx));
   $vista.querySelector("#abrir-caja-dia")?.addEventListener("click", () => abrirCaja(ctx, { alTerminar: () => ctx.refrescar() }));
   $vista.querySelectorAll("[data-cerrar-otra]").forEach(($b) => $b.addEventListener("click", () => {

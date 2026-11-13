@@ -217,6 +217,9 @@ export const tengoCodigoCaja = () => rpc("tengo_codigo_caja");
 export const abrirCaja = (base, conteo, codigo) => rpc("abrir_caja", { p_base: base, p_conteo: conteo, p_codigo: codigo || null });
 export const cerrarCaja = (cajaId, contado, conteo, esperado, resumen, codigo) =>
   rpc("cerrar_caja", { p_caja: cajaId, p_contado: contado, p_conteo: conteo, p_esperado: esperado, p_resumen: resumen, p_codigo: codigo || null });
+// Cierre del día (administrador): resumen de todas las cajas, con su clave.
+export const cerrarDia = (dia, clave, resumen, cerrarCajas) =>
+  rpc("cerrar_dia", { p_dia: dia, p_clave: clave, p_resumen: resumen, p_cerrar_cajas: Boolean(cerrarCajas) });
 export const ponerCodigoCaja = (usuarioId, codigo) => rpc("poner_codigo_caja", { p_usuario: usuarioId, p_codigo: codigo || "" });
 // Pagos cobrados en una caja (con su cuenta y sus platos) y gastos registrados en ella.
 export const pagosDeCaja = (cajaId) =>

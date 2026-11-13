@@ -1478,6 +1478,44 @@ begin
   end if;
 end $$;
 
+-- Cierre del día: lo hace el administrador al final, con su clave. Resume todas las cajas del día
+-- (de 3:00 a. m. a 3:00 a. m.) y, si quiere, cierra las cajas que sigan abiertas.
+create table if not exists public.cierres_dia (
+  id uuid primary key default gen_random_uuid(),
+  dia date not null,
+  cerrado_en timestamptz not null default now(),
+  cerrado_por uuid,
+  resumen jsonb not null default '{}'
+);
+alter table public.cierres_dia enable row level security;
+revoke all on public.cierres_dia from anon;
+grant select on public.cierres_dia to authenticated;
+grant all on public.cierres_dia to service_role;
+drop policy if exists "admin lee" on public.cierres_dia;
+create policy "admin lee" on public.cierres_dia for select to authenticated using (rol_actual() = 'admin');
+
+create or replace function public.cerrar_dia(p_dia date, p_clave text, p_resumen jsonb, p_cerrar_cajas boolean)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_id uuid;
+begin
+  perform exigir_rol('admin');
+  -- La clave tiene que ser la de un administrador.
+  if quien_autoriza(p_clave) is null then
+    perform pg_sleep(0.5);
+    raise exception 'Clave incorrecta' using errcode = '42501';
+  end if;
+  if p_cerrar_cajas then
+    update cajas set cerrada_en = now(), cerrada_por = persona_actual(),
+      resumen = coalesce(resumen, '{}') || jsonb_build_object('cierre_dia', true)
+    where cerrada_en is null;
+  end if;
+  insert into cierres_dia (dia, cerrado_por, resumen) values (p_dia, persona_actual(), coalesce(p_resumen, '{}'))
+  returning id into v_id;
+  return v_id;
+end $$;
+
 -- Cola de impresión: lo que se imprime desde un celular (cuentas, tickets de pago, cierre de caja)
 -- se guarda aquí y lo imprime el computador que tiene «Comandera aquí».
 create table if not exists public.impresiones (
@@ -1597,7 +1635,7 @@ declare
 begin
   foreach f in array array['rol_dispositivo()', 'turno_token()', 'persona_actual()', 'hay_personas()',
     'crear_primera_persona(text, text)', 'iniciar_turno(text)', 'turno_actual()', 'terminar_turno()',
-    'lista_personas()', 'guardar_persona(uuid, text, text, text, boolean)'] loop
+    'lista_personas()', 'guardar_persona(uuid, text, text, text, boolean)', 'cerrar_dia(date, text, jsonb, boolean)'] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);
   end loop;

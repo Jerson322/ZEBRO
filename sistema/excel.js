@@ -107,7 +107,7 @@ function hojaDetalle(libro, nombre, encabezado, sub, columnas, filas) {
   return ws;
 }
 
-export async function exportarVentasYGastos({ desde, hasta, cerrados, gastos, nombreCuenta, negocio, admin, menu, equipo = [], miembros = [] }) {
+export async function exportarVentasYGastos({ desde, hasta, cerrados, gastos, nombreCuenta, negocio, admin, menu, equipo = [], miembros = [], cajasDia = [], nombreArchivo = "" }) {
   const ExcelJS = await cargarExcelJS();
   const libro = new ExcelJS.Workbook();
   libro.creator = negocio?.nombre || "ZEBRO";
@@ -322,12 +322,26 @@ export async function exportarVentasYGastos({ desde, hasta, cerrados, gastos, no
     p.total ?? subtotal(p) + (p.envio || 0), p.motivo_anulacion || "",
   ]));
 
+  // ---------- Hoja 8: Cajas (cierre del día) ----------
+  if (cajasDia.length) {
+    const metodosCaja = [...new Set(cajasDia.flatMap((c) => c.metodos.map((m) => m.metodo)))];
+    hojaDetalle(libro, "Cajas", `${restaurante} · Cajas del día`, generado, [
+      { t: "Caja de", w: 20 }, { t: "Abierta", f: "hora", w: 11 }, { t: "Cerrada", w: 14 }, { t: "Base", f: "d", s: true },
+      ...metodosCaja.map((m) => ({ t: m, f: "d", s: true })), { t: "Cobrado", f: "d", s: true }, { t: "Gastos", f: "d", s: true },
+      { t: "Efectivo que debía haber", f: "d", s: true, w: 16 }, { t: "Contado", f: "d", s: true }, { t: "Resultado", w: 18 },
+    ], cajasDia.map((c) => [
+      c.persona, local(c.abierta_en), c.cerrada_en ? new Date(c.cerrada_en).toLocaleTimeString("es-CO", { hour: "numeric", minute: "2-digit" }) : "Abierta",
+      c.base, ...metodosCaja.map((m) => c.metodos.find((x) => x.metodo === m)?.valor ?? 0), c.cobrado, c.gastos,
+      c.esperado, c.contado ?? "", c.resultado,
+    ]));
+  }
+
   // Descarga.
   const datos = await libro.xlsx.writeBuffer();
   const url = URL.createObjectURL(new Blob([datos], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
   const $a = document.createElement("a");
   $a.href = url;
-  $a.download = `${restaurante.replace(/[\\/:*?"<>|]/g, "").trim()} - Ventas y gastos ${desde}${hasta !== desde ? ` a ${hasta}` : ""}.xlsx`;
+  $a.download = `${restaurante.replace(/[\\/:*?"<>|]/g, "").trim()} - ${nombreArchivo || `Ventas y gastos ${desde}${hasta !== desde ? ` a ${hasta}` : ""}`}.xlsx`;
   document.body.append($a);
   $a.click();
   $a.remove();
