@@ -36,7 +36,7 @@ export async function pintar($vista, ctx) {
     <div class="panel" id="codigos-caja">
       <h2>Códigos de caja</h2>
       <p class="suave" style="margin:0 0 10px">Cada persona que cobra (administrador o cajero) tiene su propia caja. Con su código abre y cierra
-        su caja; sus cobros y sus gastos quedan en ella. Es opcional: sin código, abre y cierra sin que se lo pidan.</p>
+        su caja; sus cobros y sus gastos quedan en ella. Es obligatorio: sin código, esa persona no puede abrir su caja (tampoco tú: asígnate el tuyo).</p>
       <div id="lista-codigos"><p class="suave">Cargando…</p></div>
     </div>
     <form class="panel formulario-plano" id="mi-clave">

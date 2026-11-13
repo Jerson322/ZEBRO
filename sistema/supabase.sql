@@ -1112,8 +1112,8 @@ alter table public.gastos add column if not exists caja_id uuid references publi
 create index if not exists pagos_por_caja on public.pagos (caja_id);
 create index if not exists gastos_por_caja on public.gastos (caja_id);
 
--- Código de caja de cada persona (lo asigna el administrador en Ajustes). Se pide para abrir y
--- cerrar su caja. Se guarda cifrado. Es distinto de la clave de autorización.
+-- Código de caja de cada persona (lo asigna el administrador en Ajustes). Es obligatorio para
+-- abrir y cerrar su caja. Se guarda cifrado. Es distinto de la clave de autorización.
 alter table public.miembros add column if not exists codigo_caja_hash text;
 
 -- El día del restaurante empieza a las 3:00 a. m. (hora de Colombia): devuelve el último corte.
@@ -1179,14 +1179,18 @@ begin
   return v_caja;
 end $$;
 
--- Revisa el código de caja de quien llama, si tiene uno. Uso interno.
+-- Revisa el código de caja de quien llama. Es obligatorio: sin código asignado no se abre ni se
+-- cierra la caja propia. Uso interno.
 create or replace function public.revisar_codigo_caja(p_codigo text) returns void
 language plpgsql security definer set search_path = public, extensions as $$
 declare
   v_hash text;
 begin
   select codigo_caja_hash into v_hash from miembros where user_id = auth.uid();
-  if v_hash is not null and (coalesce(p_codigo, '') = '' or v_hash <> extensions.crypt(p_codigo, v_hash)) then
+  if v_hash is null then
+    raise exception 'No tienes código de caja. El administrador te lo asigna en Ajustes → Códigos de caja.';
+  end if;
+  if coalesce(p_codigo, '') = '' or v_hash <> extensions.crypt(p_codigo, v_hash) then
     perform pg_sleep(0.5);
     raise exception 'Código de caja incorrecto' using errcode = '42501';
   end if;

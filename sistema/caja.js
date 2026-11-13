@@ -49,22 +49,25 @@ export function contadorEfectivo($contenedor, alCambiar = () => {}) {
   return { total: () => totalConteo(conteo), conteo: () => ({ ...conteo }) };
 }
 
-// Campo del código de caja (solo si la persona tiene uno asignado en Ajustes).
-const campoCodigo = (ctx) => (ctx.tengoCodigoCaja
+// Campo del código de caja: obligatorio. Si la persona no tiene, se le dice cómo conseguirlo.
+const campoCodigo = (tiene) => (tiene
   ? `<label>Tu código de caja<input id="codigo-caja" type="password" inputmode="numeric" maxlength="8" autocomplete="off"
-      placeholder="••••" style="font-size:22px;letter-spacing:6px;text-align:center"></label>` : "");
+      placeholder="••••" style="font-size:22px;letter-spacing:6px;text-align:center"></label>`
+  : `<p class="error" style="margin:0">No tienes código de caja. El administrador te lo asigna en <strong>Ajustes → Códigos de caja</strong>
+      (si eres el administrador, asígnatelo tú mismo ahí).</p>`);
 
 // Ventana de apertura: se cuenta la base y se abre la caja propia.
-export function abrirCaja(ctx, { alTerminar } = {}) {
+export async function abrirCaja(ctx, { alTerminar } = {}) {
   let total = 0;
+  const tiene = await api.tengoCodigoCaja().catch(() => false);
   const $c = mostrar(`
     <h2>Abrir mi caja</h2>
     <p class="suave" style="margin:0">Cuenta el efectivo con el que empiezas (la base). Tus cobros y tus gastos quedan en tu caja.</p>
     <div id="contador-apertura" class="contador-efectivo"></div>
-    ${campoCodigo(ctx)}
+    ${campoCodigo(tiene)}
     <div class="botones">
       <button type="button" id="apertura-luego">Ahora no</button>
-      <button type="button" class="principal" id="apertura-abrir">Abrir caja con $0</button>
+      <button type="button" class="principal" id="apertura-abrir"${tiene ? "" : " disabled"}>Abrir caja con $0</button>
     </div>`);
   document.getElementById("dialogo").classList.add("ancho");
   document.getElementById("dialogo").addEventListener("close", () => document.getElementById("dialogo").classList.remove("ancho"), { once: true });
